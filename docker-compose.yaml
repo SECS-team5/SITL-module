@@ -38,8 +38,10 @@ services:
       - kafka
     environment:
       KAFKA_SERVERS: kafka:29092
-      INPUT_TOPIC: input-messages
-      OUTPUT_TOPIC: verified-messages
+      INPUT_TOPICS: sitl-drone-info,sitl-drone-home
+      HOME_TOPIC: sitl-drone-home
+      OUTPUT_TOPIC: sitl-verified-messages
+      TRUSTED_HOME_SOURCES: mission-planner,orchestrator
 
   core:
     build:
@@ -56,6 +58,6 @@ services:
       - redis
     environment:
       KAFKA_SERVERS: kafka:29092
-      INPUT_TOPIC: verified-messages
+      INPUT_TOPIC: sitl-verified-messages
       REDIS_URL: redis://redis:6379
       OUTPUT_TOPIC: core-results
