@@ -162,6 +162,20 @@ def extract_course_from_nmea(sentence: str) -> float | None:
     return None
 
 
+def extract_speed_from_nmea(sentence: str) -> float | None:
+    # Извлекаем скорость из RMC (поле speed over ground в узлах) и переводим в м/с
+    msg_type, parts = parse_nmea_parts(sentence)
+    if not (msg_type.endswith("RMC") and len(parts) > 7):
+        return None
+
+    knots = to_float(parts[7])
+    if knots is None or knots < 0:
+        return None
+
+    meters_per_second = knots * 0.514444
+    return round(meters_per_second, 3)
+
+
 def course_to_vector(course_deg: float) -> dict[str, float]:
     # Переводим курс (градусы от севера по часовой стрелке) в unit-вектор x/y
     radians = math.radians(course_deg)
@@ -200,8 +214,39 @@ def extract_direction(payload: dict[str, Any]) -> dict[str, Any] | None:
     return {"course_deg": course_deg, "vector_unit": course_to_vector(course_deg)}
 
 
+def extract_speed(payload: dict[str, Any]) -> float | None:
+    # Пытаемся получить скорость из payload (м/с или узлы) или из NMEA RMC
+    speed_mps = to_float(payload.get("speed_mps"))
+    if speed_mps is not None:
+        return speed_mps if speed_mps >= 0 else None
+
+    speed_knots = to_float(payload.get("speed_knots"))
+    if speed_knots is not None:
+        return round(speed_knots * 0.514444, 3) if speed_knots >= 0 else None
+
+    raw_speed = payload.get("speed")
+    if isinstance(raw_speed, dict):
+        speed_mps_from_obj = to_float(raw_speed.get("mps"))
+        if speed_mps_from_obj is not None:
+            return speed_mps_from_obj if speed_mps_from_obj >= 0 else None
+
+        speed_knots_from_obj = to_float(raw_speed.get("knots"))
+        if speed_knots_from_obj is not None:
+            return round(speed_knots_from_obj * 0.514444, 3) if speed_knots_from_obj >= 0 else None
+    else:
+        speed_generic = to_float(raw_speed)
+        if speed_generic is not None:
+            return speed_generic if speed_generic >= 0 else None
+
+    nmea = payload.get("nmea")
+    if isinstance(nmea, str):
+        return extract_speed_from_nmea(nmea)
+
+    return None
+
+
 def enrich_payload_with_command(payload: dict[str, Any]) -> Tuple[bool, dict[str, Any], str]:
-    # Добавляем в payload стартовую позицию и направление в явном виде
+    # Добавляем в payload стартовую позицию, направление и скорость в явном виде
     normalized = dict(payload)
 
     start_position = None
@@ -224,8 +269,13 @@ def enrich_payload_with_command(payload: dict[str, Any]) -> Tuple[bool, dict[str
     if direction is None:
         return False, normalized, "cannot extract direction from payload/nmea"
 
+    speed_mps = extract_speed(payload)
+    if speed_mps is None:
+        return False, normalized, "cannot extract speed from payload/nmea"
+
     normalized["start_position"] = start_position
     normalized["direction"] = direction
+    normalized["speed_mps"] = speed_mps
 
     return True, normalized, ""
 
@@ -327,7 +377,7 @@ async def main():
                 log.warning("Rejected HOME message from topic=%s: untrusted source", msg.topic)
                 continue
 
-            # Добавляем в сообщение явные поля start_position и direction
+            # Добавляем в сообщение явные поля start_position, direction и speed_mps
             ok, normalized_payload, reason = enrich_payload_with_command(payload)
             if not ok:
                 log.warning("Rejected message from topic=%s: %s", msg.topic, reason)
@@ -344,12 +394,13 @@ async def main():
             # Публикуем только валидные сообщения в output_topic
             await producer.send_and_wait(output_topic, verified)
             log.info(
-                "Verified message_type=%s drone_id=%s message_id=%s start=%s direction=%s",
+                "Verified message_type=%s drone_id=%s message_id=%s start=%s direction=%s speed_mps=%s",
                 message_type,
                 normalized_payload.get("drone_id"),
                 normalized_payload.get("message_id"),
                 normalized_payload.get("start_position"),
                 normalized_payload.get("direction"),
+                normalized_payload.get("speed_mps"),
             )
     finally:
         await producer.stop()
