@@ -213,7 +213,24 @@ home_lon: 37.693438 (float)
 home_alt: 153.4 (float)
 last_update: "2026-03-08T16:40:00Z" (string)
 ```
-# Архитектура
+# 4. SITL-адаптер отправляет:
+
+NMEA  nav/{drone_id}/nmea, sitl/telemetry
+```
+$GNRMC,123519,A,5936.3172,N,03018.9935,E,1.23,25.8,...
+$GNGGA,123519,5936.3172,N,03018.9935,E,1,12,0.8,100.2,...
+```
+JSON телеметрия  sitl.position.v1
+```
+json
+{"drone_id":"drone_001","lat":59.9386,"lon":30.3165,"alt":100.2,"vx":1.23}
+```
+События  sitl/safety-events
+```
+json
+{"drone_id":"drone_001","event":"emergency_landing"}
+```
+# 5. Архитектура
 Каждая папка — отдельный контейнер:
 ```
 sitl-adapter/
