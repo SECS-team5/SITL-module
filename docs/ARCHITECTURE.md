@@ -1,77 +1,70 @@
 # Алгоритм работы SITL-адаптера
 
 ## 1. Схема жизненного цикла данных (Data Flow)
-Дрон в SITL-адаптере проходит три стадии состояния:
-IDLE (Ожидание): Дрон известен системе, но у него нет точки HOME. Команды движения игнорируются.
-ARMED (Готов): Получено сообщение в sitl-drone-home. Координаты записаны в Redis. Адаптер начинает транслировать NMEA с нулевой скоростью.
-MOVING (Движение): Получена команда в sitl/commands. Адаптер обновляет вектор скорости в Redis и в каждом тике (10 Гц) пересчитывает координаты.
+Дрон в SITL-адаптере проходит **три стадии состояния**:
+
+**IDLE** (Ожидание): Дрон известен системе, но у него нет точки HOME. Команды движения игнорируются.  
+**ARMED** (Готов): Получено сообщение в `sitl-drone-home`. Координаты записаны в Redis. Адаптер начинает транслировать NMEA с нулевой скоростью.  
+**MOVING** (Движение): Получена команда в `sitl/commands`. Адаптер обновляет вектор скорости в Redis и в каждом тике (10 Гц) пересчитывает координаты.
 
 ## 2. Структура хранения в Redis (Data Schema)
-Для обеспечения скорости 10 Гц на 100 дронов используйте тип данных Hash. Это позволит обновлять параметры мгновенно без перепарсинга JSON.
-Ключ: drone:{drone_id}:state
-Поля (Fields):
-lat, lon, alt — текущие географические координаты (float).
-vx, vy, vz — текущие скорости в м/с (извлекаются из команд привода).
-heading — курс (degrees).
-home_lat, home_lon, home_alt — зафиксированная точка взлета.
-last_update — timestamp последнего изменения вектора скорости.
+Для обеспечения скорости 10 Гц на 100 дронов используйте тип данных **Hash**. Это позволит обновлять параметры мгновенно без перепарсинга JSON.  
+**Ключ**: `drone:{drone_id}:state`  
+**Поля (Fields)**:
+```
+lat, lon, alt — текущие географические координаты (float)
+vx, vy, vz — текущие скорости в м/с (извлекаются из команд привода)
+speed_h_ms — горизонтальная скорость √(vx²+vy²) (float, вычисляется в ticker)
+speed_v_ms — вертикальная скорость |vz| (float, вычисляется в ticker)
+heading — курс (degrees)
+home_lat, home_lon, home_alt — зафиксированная точка взлета
+last_update — timestamp последнего изменения вектора скорости (string)
+```
 
 ## 3. Алгоритм работы Адаптера (Main Loop)
-Адаптер должен состоять из двух параллельных процессов (или асинхронных задач):
-Поток А: Приемник (Listener)
-Слушает MQTT топики sitl/commands и sitl-drone-home.
-При получении команды — просто делает HSET в Redis для соответствующего drone_id. Никаких расчетов здесь не делается.
-Поток Б: Вычислитель (Ticker 10 Hz)
-Раз в 100 мс берет список всех ключей drone:*:state.
-Для каждого дрона:
-Читает текущие lat, lon, alt и vx, vy, vz.
-Рассчитывает приращение: d=V*сек.
-Обновляет координаты
-Формирует выходной JSON.
-Публикует его в MQTT.
+Адаптер должен состоять из **двух параллельных процессов (или асинхронных задач)**:
 
-# JSON схемы для сообщений SITL
-## Общие принципы
-Изоляция — каждая схема для конкретного топика Kafka/MQTT
+**Поток А: Приемник (Listener)**  
+Слушает MQTT топики `sitl/commands` и `sitl-drone-home`.  
+При получении команды — просто делает **HSET** в Redis для соответствующего `drone_id`. Никаких расчетов здесь не делается.
 
-Контроль взаимодействия — строгая валидация входных/выходных данных
+**Поток Б: Вычислитель (Ticker 10 Hz)**  
+Раз в 100 мс берет список всех ключей `drone:*:state`.  
+Для каждого дрона:  
+- Читает текущие `lat, lon, alt` и `vx, vy, vz`  
+- Рассчитывает приращение: `Δlat=vy*0.1/6371000`, `Δlon=vx*0.1/(6371000*cos(lat))`, `Δalt=vz*0.1`  
+- **Вычисляет скорости**: `speed_h_ms=√(vx²+vy²)`, `speed_v_ms=|vz|`  
+- Обновляет координаты и скорости (HSET)  
+- Формирует выходной **NMEA**  
+- Публикует его в MQTT
 
-Минимализация доверенной базы — stateless валидация в verificator.py
+## JSON схемы для сообщений SITL
 
-Контейнеризация — схемы в schemas/ как Volume в Docker
+### Общие принципы
+- Изоляция — каждая схема для конкретного топика Kafka/MQTT
+- Контроль взаимодействия — строгая валидация входных/выходных данных
+- Минимализация доверенной базы — stateless валидация в `verificator.py`
+- Контейнеризация — схемы в `schemas/` как Volume в Docker
 
-## Базовые принципы (интерпретация для SITL)
-Взаимодействие только через брокер сообщений (sitl/commands, sitl-drone-home)
+### Базовые принципы (интерпретация для SITL)
+- Взаимодействие только через брокер сообщений (`sitl/commands`, `sitl-drone-home`)
+- Выдача событий безопасности по запросу через REST API
+- Передача телеметрии в сервис аналитики (`sitl/telemetry`)
+- Передача событий безопасности в сервис аналитики (`sitl/safety-events`)
+- События записываются в журнал с `msg_id + timestamp`
 
-Выдача событий безопасности по запросу через REST API
-
-Передача телеметрии в сервис аналитики (sitl/telemetry)
-
-Передача событий безопасности в сервис аналитики (sitl/safety-events)
-
-События записываются в журнал с msg_id + timestamp
-
-# 1. Схема входных команд от Приводов
-Топик: sitl/commands
-```
+## 1. Схема входных команд от Приводов
+**Топик**: `sitl/commands`
+```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "SITL Command Message",
   "type": "object",
   "required": ["drone_id", "msg_id", "timestamp", "nmea", "derived", "actions"],
   "properties": {
-    "drone_id": {
-      "type": "string",
-      "pattern": "^drone_[0-9]{3,4}$"
-    },
-    "msg_id": {
-      "type": "string",
-      "format": "uuid"
-    },
-    "timestamp": {
-      "type": "string",
-      "format": "date-time"
-    },
+    "drone_id": {"type": "string", "pattern": "^drone_[0-9]{3,4}$"},
+    "msg_id": {"type": "string", "format": "uuid"},
+    "timestamp": {"type": "string", "format": "date-time"},
     "nmea": {
       "type": "object",
       "required": ["rmc", "gga"],
@@ -81,11 +74,11 @@ last_update — timestamp последнего изменения вектора
           "required": ["talker_id", "time", "status", "latitude", "lat_dir", "longitude", "lon_dir", "speed_knots", "course_degrees", "date"],
           "properties": {
             "talker_id": {"type": "string", "enum": ["GN", "GP"]},
-            "time": {"type": "string", "pattern": "^[0-2][0-9][0-5][0-9][0-5][0-9]\\.[0-9]{3}$"},
+            "time": {"type": "string", "pattern": "^[0-2][0-9][0-5][0-9][0-5][0-9]\\\\.[0-9]{3}$"},
             "status": {"type": "string", "enum": ["A", "V"]},
-            "latitude": {"type": "string", "pattern": "^[0-8][0-9][0-9][0-9]\\.[0-9]{4}$"},
+            "latitude": {"type": "string", "pattern": "^[0-8][0-9][0-9][0-9]\\\\.[0-9]{4}$"},
             "lat_dir": {"type": "string", "enum": ["N", "S"]},
-            "longitude": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,2})[0-5][0-9]\\.[0-9]{4}$"},
+            "longitude": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,2})[0-5][0-9]\\\\.[0-9]{4}$"},
             "lon_dir": {"type": "string", "enum": ["E", "W"]},
             "speed_knots": {"type": "number", "minimum": 0},
             "course_degrees": {"type": "number", "minimum": 0, "maximum": 359.9},
@@ -97,10 +90,10 @@ last_update — timestamp последнего изменения вектора
           "required": ["talker_id", "time", "latitude", "lat_dir", "longitude", "lon_dir", "quality", "satellites"],
           "properties": {
             "talker_id": {"type": "string", "enum": ["GN", "GP"]},
-            "time": {"type": "string", "pattern": "^[0-2][0-9][0-5][0-9][0-5][0-9]\\.[0-9]{3}$"},
-            "latitude": {"type": "string", "pattern": "^[0-8][0-9][0-9][0-9]\\.[0-9]{4}$"},
+            "time": {"type": "string", "pattern": "^[0-2][0-9][0-5][0-9][0-5][0-9]\\\\.[0-9]{3}$"},
+            "latitude": {"type": "string", "pattern": "^[0-8][0-9][0-9][0-9]\\\\.[0-9]{4}$"},
             "lat_dir": {"type": "string", "enum": ["N", "S"]},
-            "longitude": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,2})[0-5][0-9]\\.[0-9]{4}$"},
+            "longitude": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,2})[0-5][0-9]\\\\.[0-9]{4}$"},
             "lon_dir": {"type": "string", "enum": ["E", "W"]},
             "quality": {"type": "integer", "minimum": 0, "maximum": 5},
             "satellites": {"type": "integer", "minimum": 0, "maximum": 32},
@@ -131,27 +124,18 @@ last_update — timestamp последнего изменения вектора
 }
 ```
 
-# 2. Схема HOME позиции (только trusted)
-Топик: sitl-drone-home
-```
+## 2. Схема HOME позиции (только trusted)
+**Топик**: `sitl-drone-home`
+```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "SITL Home Position Message (TRUSTED)", 
   "type": "object",
   "required": ["drone_id", "msg_id", "timestamp", "nmea", "derived"],
   "properties": {
-    "drone_id": {
-      "type": "string",
-      "pattern": "^drone_[0-9]{3,4}$"
-    },
-    "msg_id": {
-      "type": "string",
-      "format": "uuid"
-    },
-    "timestamp": {
-      "type": "string",
-      "format": "date-time"
-    },
+    "drone_id": {"type": "string", "pattern": "^drone_[0-9]{3,4}$"},
+    "msg_id": {"type": "string", "format": "uuid"},
+    "timestamp": {"type": "string", "format": "date-time"},
     "nmea": {
       "type": "object",
       "required": ["rmc", "gga"],
@@ -194,8 +178,8 @@ last_update — timestamp последнего изменения вектора
 }
 ```
 
-# 3. Схема состояния в Redis (drone:{drone_id}:state)
-Тип данных: Hash (HSET/HGETALL)
+## 3. Схема состояния в Redis (drone:{drone_id}:state)
+**Тип данных**: Hash (HSET/HGETALL)
 ```
 Ключ: drone:drone_001:state
 
@@ -204,41 +188,56 @@ status: "IDLE" | "ARMED" | "MOVING" | "EMERGENCY"
 lat: 59.938623 (float)
 lon: 30.316534 (float) 
 alt: 100.0 (float)
-vx: 1.23 (float)  // скорость Восток м/с
-vy: 0.87 (float)  // скорость Север м/с  
-vz: 0.0 (float)   // вертикальная скорость м/с
+vx: 1.23 (float)  // скорость Восток м/с (ENU)
+vy: 0.87 (float)  // скорость Север м/с (ENU)
+vz: 0.0 (float)   // вертикальная скорость м/с (вверх)
+speed_h_ms: 1.51 (float)  // горизонтальная √(vx²+vy²)
+speed_v_ms: 0.0 (float)   // вертикальная |vz|
 heading: 25.8 (float)
 home_lat: 55.703981 (float)
 home_lon: 37.693438 (float)
 home_alt: 153.4 (float)
 last_update: "2026-03-08T16:40:00Z" (string)
 ```
-# 4. SITL-адаптер отправляет:
 
-NMEA  nav/{drone_id}/nmea, sitl/telemetry
+## 4. SITL-адаптер отправляет:
+
+**NMEA** `nav/{drone_id}/nmea`, `sitl/telemetry`:
 ```
-$GNRMC,123519,A,5936.3172,N,03018.9935,E,1.23,25.8,...
-$GNGGA,123519,5936.3172,N,03018.9935,E,1,12,0.8,100.2,...
+$GNRMC,123519,A,5936.3172,N,03018.9935,E,2.94,25.8,120326,,,A*4E
+$GNGGA,123519,5936.3172,N,03018.9935,E,1,12,0.8,100.2,M,,M,,*5B
 ```
-JSON телеметрия  sitl.position.v1
+
+**JSON телеметрия** `sitl.position.v1`:
+```json
+{
+  "drone_id": "drone_001",
+  "lat": 59.9386,
+  "lon": 30.3165,
+  "alt": 100.2,
+  "vx": 1.23,
+  "speed_h_ms": 1.51,
+  "speed_v_ms": 0.0
+}
 ```
-json
-{"drone_id":"drone_001","lat":59.9386,"lon":30.3165,"alt":100.2,"vx":1.23}
+
+**События** `sitl/safety-events`:
+```json
+{
+  "drone_id": "drone_001",
+  "event": "emergency_landing"
+}
 ```
-События  sitl/safety-events
-```
-json
-{"drone_id":"drone_001","event":"emergency_landing"}
-```
-# 5. Архитектура
-Каждая папка — отдельный контейнер:
+
+## 5. Архитектура
+**Каждая папка — отдельный контейнер**:
 ```
 sitl-adapter/
 ├── schemas/
 │   ├── sitl-commands.json
 │   └── sitl-drone-home.json
-├── verificator.py
-├── core.py
-├── controller.py
-└── api-server.py
+├── verificator.py          # Stateless JSON Schema валидация
+├── core.py                 # Ticker: физика + NMEA генератор + speed_h_ms, speed_v_ms
+├── controller.py           # Listener: MQTT → Redis HSET
+└── api-server.py           # REST API для safety-events и состояния
 ```
