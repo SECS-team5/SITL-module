@@ -7,6 +7,8 @@
 **ARMED** (Готов): Получено сообщение в `sitl-drone-home`. Координаты записаны в Redis. Адаптер начинает транслировать NMEA с нулевой скоростью.  
 **MOVING** (Движение): Получена команда в `sitl/commands`. Адаптер обновляет вектор скорости в Redis и в каждом тике (10 Гц) пересчитывает координаты.
 
+ Как работает: Listener мониторит MQTT-топики. При sitl-drone-home делает HSET drone:001:state home_lat 59.9 home_lon 30.3 status "ARMED". При sitl/commands с скоростями vx²+vy²>0.01 меняет status "MOVING". Ticker проверяет статус: если MOVING — применяет физику, иначе статично транслирует HOME с v=0.
+ 
 ## 2. Структура хранения в Redis (Data Schema)
 Для обеспечения скорости 10 Гц на 100 дронов используйте тип данных **Hash**. Это позволит обновлять параметры мгновенно без перепарсинга JSON.  
 **Ключ**: `drone:{drone_id}:state`  
@@ -20,7 +22,8 @@ heading — курс (degrees)
 home_lat, home_lon, home_alt — зафиксированная точка взлета
 last_update — timestamp последнего изменения вектора скорости (string)
 ```
-
+ Как работает: Listener использует атомарный HSET — 1 команда меняет 5 полей (vx,vy,vz,heading,last_update). Ticker читает HGETALL (15 полей за 0.1мс), вычисляет speed_h_ms=math.sqrt(vx*vx+vy*vy) и speed_v_ms=abs(vz), записывает обратно HSET pipeline (атомарно для 100 дронов).
+ 
 ## 3. Алгоритм работы Адаптера (Main Loop)
 Адаптер должен состоять из **двух параллельных процессов (или асинхронных задач)**:
 
@@ -124,6 +127,8 @@ last_update — timestamp последнего изменения вектора
 }
 ```
 
+Как работает: Приводы (автопилот/симулятор) отправляют команды каждые 50-100мс. verificator.py проверяет NMEA-формат (RMC+gga), derived.lat_decimal → текущая позиция, actions.emergency_landing=true → статус EMERGENCY. Listener извлекает derived.speed_vertical_ms → HSET vz, игнорирует остальное (только скорости нужны).
+
 ## 2. Схема HOME позиции (только trusted)
 **Топик**: `sitl-drone-home`
 ```json
@@ -177,6 +182,7 @@ last_update — timestamp последнего изменения вектора
   }
 }
 ```
+Как работает: Одноразовое trusted-сообщение от оператора/системы инициализации. Требует gps_valid=true, satellites_used>=4. Listener: HSET home_lat/home_lon/home_alt/status="ARMED". Ticker при ARMED статично транслирует HOME-позицию с speed_knots=0.
 
 ## 3. Схема состояния в Redis (drone:{drone_id}:state)
 **Тип данных**: Hash (HSET/HGETALL)
@@ -199,7 +205,8 @@ home_lon: 37.693438 (float)
 home_alt: 153.4 (float)
 last_update: "2026-03-08T16:40:00Z" (string)
 ```
-
+ Как работает: Единая точка истины. Listener пишет vx,vy,vz,home_*. Ticker читает все → вычисляет координаты+скорости → пишет обратно lat,lon,alt,speed_h_ms,speed_v_ms. API читает HGETALL. TTL 1ч автоочистка неактивных дронов.
+ 
 ## 4. SITL-адаптер отправляет:
 
 **NMEA** `nav/{drone_id}/nmea`, `sitl/telemetry`:
@@ -207,6 +214,7 @@ last_update: "2026-03-08T16:40:00Z" (string)
 $GNRMC,123519,A,5936.3172,N,03018.9935,E,2.94,25.8,120326,,,A*4E
 $GNGGA,123519,5936.3172,N,03018.9935,E,1,12,0.8,100.2,M,,M,,*5B
 ```
+Как работает: Ticker формирует стандартные GPS-протоколы. lat=59.938623 → "5936.3172,N" (ddmm.ss). speed_h_ms=1.51 → 2.94 узлов (RMC). quality=1, satellites=12, hdop=0.8 (GGA). Checksum по XOR. Публикует в 4 топика: общий sitl/telemetry, персональный nav/drone_001/nmea.
 
 **JSON телеметрия** `sitl.position.v1`:
 ```json
@@ -220,7 +228,8 @@ $GNGGA,123519,5936.3172,N,03018.9935,E,1,12,0.8,100.2,M,,M,,*5B
   "speed_v_ms": 0.0
 }
 ```
-
+ Как работает: Аналитика читает структурированный JSON. Ticker публикует {drone_id, lat, lon, alt, vx, speed_h_ms, speed_v_ms} каждые 100мс. Легковесный — только ключевые метрики без NMEA-форматирования.
+ 
 **События** `sitl/safety-events`:
 ```json
 {
@@ -228,6 +237,7 @@ $GNGGA,123519,5936.3172,N,03018.9935,E,1,12,0.8,100.2,M,,M,,*5B
   "event": "emergency_landing"
 }
 ```
+Как работает: Listener при actions.emergency_landing=true публикует {event:"emergency_landing", timestamp, msg_id} + HSET status="EMERGENCY". 
 
 ## 5. Архитектура
 **Каждая папка — отдельный контейнер**:
