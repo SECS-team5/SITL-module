@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["drone_id", "home_lat", "home_lon", "home_alt"],
+  "properties": {
+    "drone_id": {
+      "type": "string",
+      "pattern": "^drone_[0-9]{3,4}$"
+    },
+    "home_lat": {
+      "type": "number"
+    },
+    "home_lon": {
+      "type": "number"
+    },
+    "home_alt": {
+      "type": "number"
+    }
+  }
+}
