@@ -1,310 +1,291 @@
 import asyncio
 import json
 import logging
-import os
 import math
+import os
 from datetime import datetime, timezone
-from typing import Any
+
 import redis.asyncio as redis
 from aiokafka import AIOKafkaConsumer
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
+
+TOPIC_COMMANDS = os.getenv("TOPIC_COMMANDS", "sitl/verified/commands")
+KAFKA_SERVERS = os.getenv("KAFKA_SERVERS", "kafka:29092")
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
+VERIFIER_STAMP = "SITL-v1"
+KEY_TTL = 7200
+KNOTS_TO_MPS = 0.514444
+
+
+# ── Геометрия ───────────────────────────────────────────────────────
+
+def course_to_vector(course_degrees: float) -> tuple[float, float]:
+    """Курс (0°=N, 90°=E) → (vx=sin, vy=cos)."""
+    rad = math.radians(course_degrees)
+    return math.sin(rad), math.cos(rad)
 
 
 def calculate_new_position(
-        lat: float,
-        lon: float,
-        vector_x: float,
-        vector_y: float,
-        speed_mps: float,
-        delta_time_sec: float
-) -> dict[str, float]:
-    """
-    Рассчитывает новую позицию дрона на основе текущей позиции, вектора направления и скорости.
+    lat: float, lon: float,
+    vx: float, vy: float,
+    speed_mps: float, dt: float,
+) -> tuple[float, float]:
+    dist = speed_mps * dt
+    new_lat = lat + (vy * dist) / 111_111.0
+    new_lon = lon + (vx * dist) / (111_111.0 * math.cos(math.radians(lat)))
+    return round(new_lat, 7), round(new_lon, 7)
 
-    Args:
-        lat: текущая широта (decimal degrees)
-        lon: текущая долгота (decimal degrees)
-        vector_x: компонента X единичного вектора направления (восток-запад)
-        vector_y: компонента Y единичного вектора направления (север-юг)
-        speed_mps: скорость в метрах в секунду
-        delta_time_sec: время с последнего обновления в секундах
 
-    Returns:
-        dict с новыми lat и lon
-    """
-    # Расстояние, пройденное за delta_time_sec
-    distance_m = speed_mps * delta_time_sec
+# ────────────────────────────────────────────────────────────────────
+# Схема §1 — ARCHITECTURE.md
+# Топик: sitl/verified/commands
+#
+# {
+#   "drone_id": "drone_001",
+#   "msg_id": "uuid",
+#   "timestamp": "ISO-8601",
+#   "nmea": {
+#     "rmc": {
+#       "talker_id": "GN",
+#       "time": "123456.789",
+#       "status": "A",
+#       "latitude": "5545.1234",
+#       "lat_dir": "N",
+#       "longitude": "03737.5678",
+#       "lon_dir": "E",
+#       "speed_knots": 15.5,
+#       "course_degrees": 270.0,
+#       "date": "150625"
+#     },
+#     "gga": {
+#       "talker_id": "GN",
+#       "time": "123456.789",
+#       "latitude": "5545.1234",
+#       "lat_dir": "N",
+#       "longitude": "03737.5678",
+#       "lon_dir": "E",
+#       "quality": 2,
+#       "satellites": 10,
+#       "hdop": 1.2              ← optional
+#     }
+#   },
+#   "derived": {
+#     "lat_decimal": 55.7558,
+#     "lon_decimal": 37.6173,
+#     "altitude_msl": 200.0,
+#     "speed_vertical_ms": 2.5   ← optional
+#   },
+#   "actions": {
+#     "drop": false,
+#     "emergency_landing": false
+#   }
+# }
+#
+# Redis-ключ: SITL:{drone_id}:state
+# ────────────────────────────────────────────────────────────────────
 
-    # Примерные коэффициенты для перевода метров в градусы
-    # 1 градус широты ≈ 111,111 метров
-    # 1 градус долготы ≈ 111,111 * cos(lat) метров
-    meters_per_degree_lat = 111111.0
-    meters_per_degree_lon = 111111.0 * math.cos(math.radians(lat))
 
-    # Рассчитываем смещение в градусах
-    delta_lat = (vector_y * distance_m) / meters_per_degree_lat
-    delta_lon = (vector_x * distance_m) / meters_per_degree_lon
+# ── Обработка команды из Kafka ──────────────────────────────────────
 
-    # Возвращаем новые координаты с округлением до 7 знаков
-    return {
-        "lat": round(lat + delta_lat, 7),
-        "lon": round(lon + delta_lon, 7)
+async def process_command(r: redis.Redis, data: dict) -> None:
+    """Записывает команду в Redis по схеме §1."""
+    drone_id = data["drone_id"]
+    key = f"SITL:{drone_id}:state"
+
+    nmea_rmc = data["nmea"]["rmc"]
+    nmea_gga = data["nmea"]["gga"]
+    derived = data["derived"]
+    actions = data["actions"]
+
+    record = {
+        # ── top-level (required) ──
+        "drone_id":  data["drone_id"],
+        "msg_id":    data["msg_id"],
+        "timestamp": data["timestamp"],
+
+        # ── nmea (required) ──
+        "nmea": {
+            "rmc": {
+                "talker_id":      nmea_rmc["talker_id"],
+                "time":           nmea_rmc["time"],
+                "status":         nmea_rmc["status"],
+                "latitude":       nmea_rmc["latitude"],
+                "lat_dir":        nmea_rmc["lat_dir"],
+                "longitude":      nmea_rmc["longitude"],
+                "lon_dir":        nmea_rmc["lon_dir"],
+                "speed_knots":    nmea_rmc["speed_knots"],
+                "course_degrees": nmea_rmc["course_degrees"],
+                "date":           nmea_rmc["date"],
+            },
+            "gga": {
+                "talker_id":  nmea_gga["talker_id"],
+                "time":       nmea_gga["time"],
+                "latitude":   nmea_gga["latitude"],
+                "lat_dir":    nmea_gga["lat_dir"],
+                "longitude":  nmea_gga["longitude"],
+                "lon_dir":    nmea_gga["lon_dir"],
+                "quality":    nmea_gga["quality"],
+                "satellites": nmea_gga["satellites"],
+            },
+        },
+
+        # ── derived (required) ──
+        "derived": {
+            "lat_decimal":  derived["lat_decimal"],
+            "lon_decimal":  derived["lon_decimal"],
+            "altitude_msl": derived["altitude_msl"],
+        },
+
+        # ── actions (required) ──
+        "actions": {
+            "drop":              actions["drop"],
+            "emergency_landing": actions["emergency_landing"],
+        },
+
+        "stored_at": datetime.now(timezone.utc).isoformat(),
     }
 
+    # optional
+    if "hdop" in nmea_gga:
+        record["nmea"]["gga"]["hdop"] = nmea_gga["hdop"]
+    if "speed_vertical_ms" in derived:
+        record["derived"]["speed_vertical_ms"] = derived["speed_vertical_ms"]
 
-def get_drone_key(drone_id: str) -> str:
-    """Формирует ключ Redis для дрона."""
-    return f"SITL:DRONE:{drone_id}"
+    await r.set(key, json.dumps(record), ex=KEY_TTL)
+    log.info("📡 Command saved → %s", key)
 
 
-async def update_drone_position(r: redis.Redis, drone_id: str, update_interval_sec: float):
-    """
-    Обновляет позицию одного дрона на основе его направления и скорости.
+# ── Обновление позиции одного дрона ─────────────────────────────────
+#
+# Читает из Redis JSON по схеме §1:
+#   state["derived"]["lat_decimal"]         ← текущая широта
+#   state["derived"]["lon_decimal"]         ← текущая долгота
+#   state["nmea"]["rmc"]["speed_knots"]     ← скорость в узлах
+#   state["nmea"]["rmc"]["course_degrees"]  ← курс в градусах
+#
+# Обновляет:
+#   state["derived"]["lat_decimal"]         → новая широта
+#   state["derived"]["lon_decimal"]         → новая долгота
+# ────────────────────────────────────────────────────────────────────
 
-    Args:
-        r: Redis клиент
-        drone_id: ID дрона
-        update_interval_sec: интервал обновления в секундах (0.1 для 10 Гц)
-    """
-    key = get_drone_key(drone_id)
-
-    # Читаем текущее состояние дрона из Redis
-    data_raw = await r.get(key)
-    if data_raw is None:
+async def update_drone_position(r: redis.Redis, key: str, dt: float) -> None:
+    raw = await r.get(key)
+    if raw is None:
         return
 
-    # Парсим JSON
     try:
-        drone_data = json.loads(data_raw)
+        state = json.loads(raw)
     except json.JSONDecodeError:
-        log.warning("Invalid JSON in Redis for drone_id=%s", drone_id)
+        log.warning("Invalid JSON — %s", key)
         return
 
-    # Извлекаем необходимые данные для расчёта
-    start_position = drone_data.get("start_position")
-    direction = drone_data.get("direction")
-    speed_mps = drone_data.get("speed_mps", 0.0)
+    derived = state.get("derived")
+    rmc = state.get("nmea", {}).get("rmc")
 
-    # Без позиции или направления расчёт невозможен
-    if not start_position or not direction:
+    if not derived or not rmc:
         return
 
-    lat = start_position.get("lat")
-    lon = start_position.get("lon")
-    vector_unit = direction.get("vector_unit")
+    lat = derived.get("lat_decimal")              # схема §1: derived.lat_decimal
+    lon = derived.get("lon_decimal")              # схема §1: derived.lon_decimal
+    speed_knots = rmc.get("speed_knots", 0.0)     # схема §1: nmea.rmc.speed_knots
+    course = rmc.get("course_degrees", 0.0)       # схема §1: nmea.rmc.course_degrees
 
-    # Проверяем наличие всех компонентов
-    if lat is None or lon is None or not vector_unit:
+    if lat is None or lon is None:
         return
 
-    vector_x = vector_unit.get("x", 0.0)
-    vector_y = vector_unit.get("y", 0.0)
+    speed_mps = speed_knots * KNOTS_TO_MPS
+    vx, vy = course_to_vector(course)
+    new_lat, new_lon = calculate_new_position(lat, lon, vx, vy, speed_mps, dt)
 
-    # Рассчитываем новую позицию
-    new_position = calculate_new_position(
-        lat, lon, vector_x, vector_y, speed_mps, update_interval_sec
-    )
+    # обновляем координаты в той же структуре схемы §1
+    state["derived"]["lat_decimal"] = new_lat     # схема §1: derived.lat_decimal
+    state["derived"]["lon_decimal"] = new_lon     # схема §1: derived.lon_decimal
+    state["last_position_update"] = datetime.now(timezone.utc).isoformat()
 
-    # Обновляем start_position новыми координатами
-    drone_data["start_position"] = new_position
-    drone_data["last_update"] = datetime.now(timezone.utc).isoformat()
-
-    # Сохраняем обратно в Redis с TTL 2 часа
-    await r.set(key, json.dumps(drone_data), ex=7200)
+    await r.set(key, json.dumps(state), ex=KEY_TTL)
 
 
-async def position_updater_task(r: redis.Redis, update_hz: float = 10.0):
-    """
-    Фоновая задача для обновления позиций всех дронов с частотой 10 Гц.
+# ── Фоновая задача: обновление позиций 10 Гц ───────────────────────
 
-    Args:
-        r: Redis клиент
-        update_hz: частота обновления в Гц (по умолчанию 10)
-    """
-    update_interval_sec = 1.0 / update_hz
-    log.info("Position updater started with frequency %.1f Hz", update_hz)
+async def position_updater_task(r: redis.Redis, update_hz: float = 10.0) -> None:
+    dt = 1.0 / update_hz
+    log.info("🔄 Position updater — %.1f Hz", update_hz)
 
     while True:
         try:
-            # Собираем все ID дронов из Redis по паттерну
-            drone_ids = []
+            keys: list[str] = []
             cursor = 0
-
-            # Используем SCAN для итерации по ключам (не блокирует Redis)
             while True:
-                cursor, keys = await r.scan(cursor, match="SITL:DRONE:*", count=100)
-                for key in keys:
-                    # Извлекаем drone_id из ключа "SITL:DRONE:drone_id"
-                    key_str = key.decode() if isinstance(key, bytes) else key
-                    drone_id = key_str.replace("SITL:DRONE:", "")
-                    drone_ids.append(drone_id)
-
-                # cursor == 0 означает конец итерации
+                cursor, batch = await r.scan(cursor, match="SITL:*:state", count=100)
+                keys.extend(batch)
                 if cursor == 0:
                     break
 
-            # Обновляем позицию каждого дрона
-            for drone_id in drone_ids:
-                await update_drone_position(r, drone_id, update_interval_sec)
+            for key in keys:
+                await update_drone_position(r, key, dt)
 
-            # Ждём до следующего цикла обновления
-            await asyncio.sleep(update_interval_sec)
+        except Exception:
+            log.exception("💥 Position updater error")
 
-        except Exception as e:
-            log.error("Error in position updater: %s", e, exc_info=True)
-            await asyncio.sleep(update_interval_sec)
+        await asyncio.sleep(dt)
 
 
-async def process_command(r: redis.Redis, verified_message: dict[str, Any]):
-    """
-    Обрабатывает команду из верификатора.
-    Определяет: существует ли дрон в Redis?
-    - Если нет: создаёт новую запись
-    - Если да: обновляет направление
+# ── Задача чтения команд из Kafka ──────────────────────────────────
 
-    Args:
-        r: Redis клиент
-        verified_message: верифицированное сообщение из Kafka
-    """
-    data = verified_message.get("data", {})
-    message_type = verified_message.get("message_type")
-
-    # Извлекаем drone_id
-    drone_id = data.get("drone_id")
-    if not drone_id:
-        log.warning("Missing drone_id in verified message")
-        return
-
-    key = get_drone_key(drone_id)
-
-    # Проверяем, существует ли дрон в Redis
-    existing_data_raw = await r.get(key)
-
-    # Извлекаем позицию и направление из сообщения
-    start_position = data.get("start_position")
-    direction = data.get("direction")
-
-    if existing_data_raw is None:
-        # Дрон не существует - создаём новую запись
-
-        # Для нового дрона обязательны start_position и direction
-        if not start_position or not direction:
-            log.warning("Missing start_position or direction for new drone_id=%s", drone_id)
-            return
-
-        # Формируем запись дрона
-        drone_data = {
-            "drone_id": drone_id,
-            "message_type": message_type,
-            "start_position": start_position,
-            "direction": direction,
-            "speed_mps": data.get("speed_mps", 5.0),  # Скорость по умолчанию 5 м/с
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "last_update": datetime.now(timezone.utc).isoformat()
-        }
-
-        # Сохраняем в Redis с TTL 2 часа
-        await r.set(key, json.dumps(drone_data), ex=7200)
-        log.info(
-            "✨ Created drone: id=%s pos=%s dir=%s",
-            drone_id, start_position, direction
-        )
-    else:
-        # Дрон существует - обновляем направление
-
-        # Парсим существующие данные
-        try:
-            drone_data = json.loads(existing_data_raw)
-        except json.JSONDecodeError:
-            log.warning("Invalid JSON in Redis for drone_id=%s", drone_id)
-            return
-
-        # Обновляем направление, если оно есть в команде
-        if direction:
-            drone_data["direction"] = direction
-            drone_data["last_update"] = datetime.now(timezone.utc).isoformat()
-
-            # Обновляем скорость, если она указана в команде
-            if "speed_mps" in data:
-                drone_data["speed_mps"] = data["speed_mps"]
-
-            # Сохраняем обновлённые данные
-            await r.set(key, json.dumps(drone_data), ex=7200)
-            log.info(
-                "🔄 Updated drone: id=%s new_dir=%s type=%s",
-                drone_id, direction, message_type
-            )
-
-
-async def command_processor_task(r: redis.Redis, input_topic: str, kafka_servers: str):
-    """
-    Фоновая задача для обработки команд из Kafka.
-    Слушает топик с верифицированными сообщениями и обрабатывает их.
-
-    Args:
-        r: Redis клиент
-        input_topic: топик для чтения верифицированных сообщений
-        kafka_servers: адреса Kafka брокеров
-    """
-    # Создаём Kafka consumer
+async def command_listener_task(r: redis.Redis) -> None:
     consumer = AIOKafkaConsumer(
-        input_topic,
-        bootstrap_servers=kafka_servers,
-        group_id="SITL-drone-controller-v1",
-        value_deserializer=lambda m: json.loads(m.decode())
+        TOPIC_COMMANDS,
+        bootstrap_servers=KAFKA_SERVERS,
+        group_id="SITL-controller-v1",
+        auto_offset_reset="latest",
+        value_deserializer=lambda m: json.loads(m.decode()),
     )
-
     await consumer.start()
-    log.info("Command processor started, topic=%s", input_topic)
+    log.info("📥 Command listener started — [%s]", TOPIC_COMMANDS)
 
     try:
-        # Читаем сообщения из Kafka
         async for msg in consumer:
-            verified_message = msg.value
+            payload = msg.value
 
-            # Проверяем метку верификатора - принимаем только проверенные сообщения
-            if verified_message.get("verifier_stage") != "SITL-v1":
-                log.warning("❌ Invalid verifier stamp")
+            if payload.get("verifier_stage") != VERIFIER_STAMP:
+                log.warning("❌ No verifier stamp")
                 continue
 
-            # Обрабатываем команду
-            await process_command(r, verified_message)
+            data = payload.get("data")
+            if not data:
+                log.warning("❌ Empty data — skip")
+                continue
 
-    except Exception as e:
-        log.error("Error in command processor: %s", e, exc_info=True)
+            try:
+                await process_command(r, data)
+            except KeyError as e:
+                log.error("❌ Missing required field %s", e)
+            except Exception:
+                log.exception("💥 Error processing command")
+
     finally:
         await consumer.stop()
 
 
-async def main():
-    # Читаем конфигурацию из переменных окружения
-    redis_url = os.getenv("REDIS_URL", "redis://redis:6379")
-    kafka_servers = os.getenv("KAFKA_SERVERS", "kafka:9092")
-    input_topic = os.getenv("INPUT_TOPIC", "sitl-verified-messages")
+# ── Main: две параллельные задачи ───────────────────────────────────
+
+async def main() -> None:
     update_hz = float(os.getenv("UPDATE_FREQUENCY_HZ", "10.0"))
 
-    # Создаём подключение к Redis
-    r = redis.from_url(redis_url)
-
-    log.info("🚁 Drone Controller started")
-    log.info("📡 Redis: %s", redis_url)
-    log.info("📡 Kafka: %s", kafka_servers)
-    log.info("📥 Input topic: %s", input_topic)
-    log.info("⚡ Update frequency: %.1f Hz", update_hz)
+    r = redis.from_url(REDIS_URL, decode_responses=True)
+    await r.ping()
+    log.info("🚁 Controller started")
 
     try:
-        # Запускаем две параллельные задачи:
-        # 1. Position Updater - обновляет координаты с частотой 10 Гц
-        # 2. Command Processor - обрабатывает команды из Kafka
         await asyncio.gather(
-            position_updater_task(r, update_hz),
-            command_processor_task(r, input_topic, kafka_servers)
+            command_listener_task(r),       # Kafka → Redis (схема §1)
+            position_updater_task(r, update_hz),  # Redis → Redis (10 Гц)
         )
     finally:
         await r.aclose()
-        log.info("🛑 Drone Controller stopped")
+        log.info("🛑 Controller stopped")
 
 
 if __name__ == "__main__":
