@@ -33,15 +33,37 @@ services:
         COPY requirements.txt .
         RUN pip install --no-cache-dir -r requirements.txt
         COPY src/ ./src/
+        COPY schemas/ ./schemas/
         CMD ["python", "src/verifier.py"]
     depends_on:
       - kafka
     environment:
       KAFKA_SERVERS: kafka:29092
-      INPUT_TOPICS: sitl-drone-info,sitl-drone-home
+      COMMAND_TOPIC: sitl/commands
+      INPUT_TOPICS: sitl/commands,sitl-drone-home
       HOME_TOPIC: sitl-drone-home
       OUTPUT_TOPIC: sitl-verified-messages
-      TRUSTED_HOME_SOURCES: mission-planner,orchestrator
+
+  controller:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        WORKDIR /app
+        COPY requirements.txt .
+        RUN pip install --no-cache-dir -r requirements.txt
+        COPY src/ ./src/
+        COPY schemas/ ./schemas/
+        CMD ["python", "src/controller.py"]
+    depends_on:
+      - kafka
+      - redis
+    environment:
+      KAFKA_SERVERS: kafka:29092
+      REDIS_URL: redis://redis:6379
+      INPUT_TOPIC: sitl-verified-messages
+      COMMAND_TOPIC: sitl/commands
+      HOME_TOPIC: sitl-drone-home
 
   core:
     build:
@@ -52,12 +74,14 @@ services:
         COPY requirements.txt .
         RUN pip install --no-cache-dir -r requirements.txt
         COPY src/ ./src/
+        COPY schemas/ ./schemas/
         CMD ["python", "src/core.py"]
     depends_on:
-      - kafka
       - redis
+      - kafka
     environment:
       KAFKA_SERVERS: kafka:29092
-      INPUT_TOPIC: sitl-verified-messages
       REDIS_URL: redis://redis:6379
-      OUTPUT_TOPIC: core-results
+      UPDATE_FREQUENCY_HZ: 10.0
+      POSITION_REQUEST_TOPIC: sitl/position/request
+      POSITION_RESPONSE_TOPIC: sitl/position/response
