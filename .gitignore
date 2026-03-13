@@ -12,3 +12,4 @@ htmlcov/
 sitl_venv/
 .venv/
 *.pyc
+*.drawio
