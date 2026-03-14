@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 from typing import Iterable
 from typing import Tuple
+from uuid import uuid4
 
 from jsonschema import Draft202012Validator
 
@@ -15,6 +16,10 @@ POSITION_RESPONSE_SCHEMA_NAME = "sitl-position-response.json"
 VERIFIER_STAGE = "SITL-v1"
 TRANSPORT_FIELDS = frozenset({"correlation_id", "reply_to"})
 SCHEMAS_DIR = Path(__file__).resolve().parents[1] / "schemas"
+VERIFIED_COMMAND_TOPIC_DEFAULT = "sitl-verified-commands"
+VERIFIED_HOME_TOPIC_DEFAULT = "sitl-verified-home"
+POSITION_REQUEST_TOPIC_DEFAULT = "sitl-position-request"
+POSITION_RESPONSE_TOPIC_DEFAULT = "sitl-position-response"
 
 
 def parse_json_payload(raw: Any) -> dict[str, Any] | None:
@@ -99,6 +104,54 @@ def build_verified_message(
         "verifier_stage": VERIFIER_STAGE,
         "verified_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
+
+
+def resolve_verified_topic(
+    message_type: str,
+    verified_commands_topic: str,
+    verified_home_topic: str,
+) -> str:
+    if message_type == "COMMAND":
+        return verified_commands_topic
+    if message_type == "HOME":
+        return verified_home_topic
+    raise ValueError(f"unsupported message_type '{message_type}'")
+
+
+def decode_headers(headers: list[tuple[str, bytes]] | None) -> dict[str, str]:
+    decoded: dict[str, str] = {}
+    for key, value in headers or []:
+        decoded[key] = value.decode() if isinstance(value, (bytes, bytearray)) else str(value)
+    return decoded
+
+
+def get_transport_value(
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    field: str,
+) -> str:
+    header_value = headers.get(field, "").strip()
+    if header_value:
+        return header_value
+
+    payload_value = payload.get(field)
+    if payload_value is None:
+        return ""
+    return str(payload_value).strip()
+
+
+def generate_correlation_id() -> str:
+    return uuid4().hex
+
+
+def build_request_headers(
+    correlation_id: str,
+    reply_to: str,
+) -> list[tuple[str, bytes]]:
+    return [
+        ("correlation_id", correlation_id.encode()),
+        ("reply_to", reply_to.encode()),
+    ]
 
 
 def is_iso_timestamp(value: Any) -> bool:

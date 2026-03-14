@@ -12,13 +12,12 @@ if str(TESTS) not in sys.path:
     sys.path.insert(0, str(TESTS))
 
 import controller  # type: ignore  # noqa: E402
-import contracts  # type: ignore  # noqa: E402
 import state  # type: ignore  # noqa: E402
 from fakes import FakeRedis  # type: ignore  # noqa: E402
 
 
-COMMAND_TOPIC = "sitl/commands"
-HOME_TOPIC = "sitl-drone-home"
+VERIFIED_COMMAND_TOPIC = "sitl-verified-commands"
+VERIFIED_HOME_TOPIC = "sitl-verified-home"
 STATE_TTL_SEC = 7200
 
 
@@ -31,13 +30,13 @@ def test_home_message_creates_armed_state_hash() -> None:
             "home_lon": 30.3141,
             "home_alt": 120.0,
         }
-        verified_message = contracts.build_verified_message(HOME_TOPIC, "HOME", payload)
 
         ok = await controller.process_verified_message(
             redis_client,
-            verified_message,
-            COMMAND_TOPIC,
-            HOME_TOPIC,
+            VERIFIED_HOME_TOPIC,
+            payload,
+            VERIFIED_COMMAND_TOPIC,
+            VERIFIED_HOME_TOPIC,
             STATE_TTL_SEC,
         )
 
@@ -58,23 +57,20 @@ def test_home_message_creates_armed_state_hash() -> None:
 def test_command_is_ignored_until_home_is_known() -> None:
     async def scenario() -> None:
         redis_client = FakeRedis()
-        verified_message = contracts.build_verified_message(
-            COMMAND_TOPIC,
-            "COMMAND",
-            {
-                "drone_id": "drone_001",
-                "vx": 1.0,
-                "vy": 0.0,
-                "vz": 0.0,
-                "mag_heading": 15.0,
-            },
-        )
+        payload = {
+            "drone_id": "drone_001",
+            "vx": 1.0,
+            "vy": 0.0,
+            "vz": 0.0,
+            "mag_heading": 15.0,
+        }
 
         ok = await controller.process_verified_message(
             redis_client,
-            verified_message,
-            COMMAND_TOPIC,
-            HOME_TOPIC,
+            VERIFIED_COMMAND_TOPIC,
+            payload,
+            VERIFIED_COMMAND_TOPIC,
+            VERIFIED_HOME_TOPIC,
             STATE_TTL_SEC,
         )
 
@@ -87,40 +83,34 @@ def test_command_is_ignored_until_home_is_known() -> None:
 def test_command_updates_existing_hash_and_marks_drone_moving() -> None:
     async def scenario() -> None:
         redis_client = FakeRedis()
-        home_message = contracts.build_verified_message(
-            HOME_TOPIC,
-            "HOME",
-            {
-                "drone_id": "drone_001",
-                "home_lat": 59.9386,
-                "home_lon": 30.3141,
-                "home_alt": 120.0,
-            },
-        )
-        command_message = contracts.build_verified_message(
-            COMMAND_TOPIC,
-            "COMMAND",
-            {
-                "drone_id": "drone_001",
-                "vx": 3.0,
-                "vy": 4.0,
-                "vz": 1.5,
-                "mag_heading": 90.0,
-            },
-        )
+        home_payload = {
+            "drone_id": "drone_001",
+            "home_lat": 59.9386,
+            "home_lon": 30.3141,
+            "home_alt": 120.0,
+        }
+        command_payload = {
+            "drone_id": "drone_001",
+            "vx": 3.0,
+            "vy": 4.0,
+            "vz": 1.5,
+            "mag_heading": 90.0,
+        }
 
         await controller.process_verified_message(
             redis_client,
-            home_message,
-            COMMAND_TOPIC,
-            HOME_TOPIC,
+            VERIFIED_HOME_TOPIC,
+            home_payload,
+            VERIFIED_COMMAND_TOPIC,
+            VERIFIED_HOME_TOPIC,
             STATE_TTL_SEC,
         )
         ok = await controller.process_verified_message(
             redis_client,
-            command_message,
-            COMMAND_TOPIC,
-            HOME_TOPIC,
+            VERIFIED_COMMAND_TOPIC,
+            command_payload,
+            VERIFIED_COMMAND_TOPIC,
+            VERIFIED_HOME_TOPIC,
             STATE_TTL_SEC,
         )
 
@@ -134,5 +124,28 @@ def test_command_updates_existing_hash_and_marks_drone_moving() -> None:
         assert stored_state["vz"] == 1.5
         assert stored_state["speed_h_ms"] == 5.0
         assert stored_state["speed_v_ms"] == 1.5
+
+    asyncio.run(scenario())
+
+
+def test_invalid_home_message_is_rejected() -> None:
+    async def scenario() -> None:
+        redis_client = FakeRedis()
+        payload = {
+            "drone_id": "drone_001",
+            "home_lat": 59.9386,
+            "home_lon": 30.3141,
+        }
+
+        ok = await controller.process_verified_message(
+            redis_client,
+            VERIFIED_HOME_TOPIC,
+            payload,
+            VERIFIED_COMMAND_TOPIC,
+            VERIFIED_HOME_TOPIC,
+            STATE_TTL_SEC,
+        )
+
+        assert ok is False
 
     asyncio.run(scenario())

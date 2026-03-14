@@ -8,39 +8,21 @@ import redis.asyncio as redis
 from aiokafka import AIOKafkaConsumer
 from aiokafka import AIOKafkaProducer
 
-from contracts import POSITION_REQUEST_SCHEMA_NAME
+from contracts import build_request_headers
+from contracts import decode_headers
+from contracts import get_transport_value
 from contracts import parse_json_payload
+from contracts import POSITION_REQUEST_SCHEMA_NAME
+from contracts import POSITION_REQUEST_TOPIC_DEFAULT
+from contracts import POSITION_RESPONSE_TOPIC_DEFAULT
 from contracts import validate_schema
 from state import advance_drone_state
 from state import build_position_response
-from state import get_drone_state_key
 from state import normalize_state
 from state import serialize_state
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
-
-
-def decode_headers(headers: list[tuple[str, bytes]] | None) -> dict[str, str]:
-    decoded: dict[str, str] = {}
-    for key, value in headers or []:
-        decoded[key] = value.decode() if isinstance(value, (bytes, bytearray)) else str(value)
-    return decoded
-
-
-def get_transport_value(
-    payload: dict[str, Any],
-    headers: dict[str, str],
-    field: str,
-) -> str:
-    header_value = headers.get(field, "").strip()
-    if header_value:
-        return header_value
-
-    payload_value = payload.get(field)
-    if payload_value is None:
-        return ""
-    return str(payload_value).strip()
 
 
 async def refresh_state_ttl(
@@ -103,7 +85,7 @@ async def resolve_position_request(
         return None, reason
 
     drone_id = payload["drone_id"]
-    raw_state = await r.hgetall(get_drone_state_key(drone_id))
+    raw_state = await r.hgetall(f"drone:{drone_id}:state")
     if not raw_state:
         return None, f"drone '{drone_id}' state not found"
 
@@ -153,9 +135,7 @@ async def position_request_processor_task(
             headers = decode_headers(msg.headers)
             reply_to = get_transport_value(payload, headers, "reply_to") or default_response_topic
             correlation_id = get_transport_value(payload, headers, "correlation_id")
-            response_headers: list[tuple[str, bytes]] = []
-            if correlation_id:
-                response_headers.append(("correlation_id", correlation_id.encode()))
+            response_headers = build_request_headers(correlation_id, reply_to) if correlation_id else []
 
             await producer.send_and_wait(
                 reply_to,
@@ -173,8 +153,8 @@ async def main() -> None:
     kafka_servers = os.getenv("KAFKA_SERVERS", "kafka:9092")
     update_hz = float(os.getenv("UPDATE_FREQUENCY_HZ", "10.0"))
     state_ttl_sec = int(os.getenv("STATE_TTL_SEC", "7200"))
-    request_topic = os.getenv("POSITION_REQUEST_TOPIC", "sitl/position/request")
-    response_topic = os.getenv("POSITION_RESPONSE_TOPIC", "sitl/position/response")
+    request_topic = os.getenv("POSITION_REQUEST_TOPIC", POSITION_REQUEST_TOPIC_DEFAULT)
+    response_topic = os.getenv("POSITION_RESPONSE_TOPIC", POSITION_RESPONSE_TOPIC_DEFAULT)
     r = redis.from_url(redis_url, decode_responses=True)
 
     log.info(
