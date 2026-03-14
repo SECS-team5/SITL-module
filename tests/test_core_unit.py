@@ -12,119 +12,86 @@ if str(TESTS) not in sys.path:
     sys.path.insert(0, str(TESTS))
 
 import core  # type: ignore  # noqa: E402
-import state  # type: ignore  # noqa: E402
 from fakes import FakeRedis  # type: ignore  # noqa: E402
 
 
-def test_advance_drone_state_moves_lat_lon_and_alt() -> None:
-    initial_state = state.apply_command_update(
-        state.build_home_state(
-            {
-                "drone_id": "drone_001",
-                "home_lat": 59.9386,
-                "home_lon": 30.3141,
-                "home_alt": 120.0,
-            }
-        ),
-        {
-            "drone_id": "drone_001",
-            "vx": 2.0,
-            "vy": 3.0,
-            "vz": 1.0,
-            "mag_heading": 45.0,
+def build_home_payload() -> dict:
+    return {
+        "drone_id": "drone_001",
+        "msg_id": "msg-home",
+        "timestamp": "2026-03-14T10:00:00Z",
+        "nmea": {
+            "rmc": {
+                "talker_id": "GN",
+                "time": "123456.789",
+                "status": "A",
+                "latitude": "5545.1234",
+                "lat_dir": "N",
+                "longitude": "03737.5678",
+                "lon_dir": "E",
+                "speed_knots": 0.0,
+                "course_degrees": 90.0,
+                "date": "150625",
+            },
+            "gga": {
+                "talker_id": "GN",
+                "time": "123456.789",
+                "latitude": "5545.1234",
+                "lat_dir": "N",
+                "longitude": "03737.5678",
+                "lon_dir": "E",
+                "quality": 2,
+                "satellites": 10,
+            },
         },
-    )
-
-    updated_state = state.advance_drone_state(initial_state, 2.0)
-
-    assert updated_state["lat"] > initial_state["lat"]
-    assert updated_state["lon"] > initial_state["lon"]
-    assert updated_state["alt"] == 122.0
-
-
-def test_build_position_response_matches_architecture_contract() -> None:
-    response = state.build_position_response(
-        {
-            "lat": 59.9386,
-            "lon": 30.3141,
-            "alt": 120.0,
-        }
-    )
-
-    assert response == {
-        "lat": 59.9386,
-        "lon": 30.3141,
-        "alt": 120.0,
+        "derived": {
+            "lat_decimal": 55.7558,
+            "lon_decimal": 37.6173,
+            "altitude_msl": 200.0,
+            "gps_valid": True,
+            "satellites_used": 10,
+            "heading_at_home": 90.0,
+            "position_accuracy_hdop": 1.1,
+            "coord_system": "WGS84",
+        },
     }
 
 
-def test_resolve_position_request_accepts_transport_metadata_and_returns_position() -> None:
+def test_process_home_persists_expected_home_payload() -> None:
     async def scenario() -> None:
         redis_client = FakeRedis()
-        drone_key = state.get_drone_state_key("drone_001")
-        await redis_client.hset(
-            drone_key,
-            mapping=state.serialize_state(
-                state.build_home_state(
-                    {
-                        "drone_id": "drone_001",
-                        "home_lat": 59.9386,
-                        "home_lon": 30.3141,
-                        "home_alt": 120.0,
-                    }
-                )
-            ),
-        )
+        payload = build_home_payload()
 
-        response, reason = await core.resolve_position_request(
-            redis_client,
-            {
-                "drone_id": "drone_001",
-                "correlation_id": "req-123",
-                "reply_to": "custom-topic",
-            },
-        )
+        await core.process_home(redis_client, payload)
 
-        assert reason == ""
-        assert response == {
-            "lat": 59.9386,
-            "lon": 30.3141,
-            "alt": 120.0,
-        }
+        stored = redis_client.decode_json("SITL:drone_001:home")
+        assert stored["drone_id"] == "drone_001"
+        assert stored["derived"]["gps_valid"] is True
+        assert stored["derived"]["heading_at_home"] == 90.0
+        assert stored["derived"]["position_accuracy_hdop"] == 1.1
+        assert stored["derived"]["coord_system"] == "WGS84"
+        assert redis_client.expirations["SITL:drone_001:home"] == core.KEY_TTL
 
     asyncio.run(scenario())
 
 
-def test_update_drone_position_persists_new_coordinates_and_refreshes_ttl() -> None:
+def test_process_home_keeps_required_nested_fields() -> None:
     async def scenario() -> None:
         redis_client = FakeRedis()
-        drone_key = state.get_drone_state_key("drone_001")
-        moving_state = state.apply_command_update(
-            state.build_home_state(
-                {
-                    "drone_id": "drone_001",
-                    "home_lat": 59.9386,
-                    "home_lon": 30.3141,
-                    "home_alt": 120.0,
-                }
-            ),
-            {
-                "drone_id": "drone_001",
-                "vx": 2.0,
-                "vy": 3.0,
-                "vz": 0.5,
-                "mag_heading": 30.0,
-            },
-        )
-        await redis_client.hset(drone_key, mapping=state.serialize_state(moving_state))
+        payload = build_home_payload()
+        payload["drone_id"] = "drone_002"
+        payload["msg_id"] = "msg-home-2"
+        payload["nmea"]["rmc"]["course_degrees"] = 180.0
+        payload["nmea"]["gga"]["quality"] = 1
+        payload["derived"]["gps_valid"] = False
+        payload["derived"]["satellites_used"] = 8
 
-        ok = await core.update_drone_position(redis_client, drone_key, 1.0, 7200)
-        updated_state = state.normalize_state(await redis_client.hgetall(drone_key))
+        await core.process_home(redis_client, payload)
 
-        assert ok is True
-        assert updated_state["lat"] > moving_state["lat"]
-        assert updated_state["lon"] > moving_state["lon"]
-        assert updated_state["alt"] == 120.5
-        assert redis_client.expirations[drone_key] == 7200
+        stored = redis_client.decode_json("SITL:drone_002:home")
+        assert stored["nmea"]["rmc"]["course_degrees"] == 180.0
+        assert stored["nmea"]["gga"]["quality"] == 1
+        assert stored["derived"]["satellites_used"] == 8
+        assert stored["derived"]["gps_valid"] is False
 
     asyncio.run(scenario())

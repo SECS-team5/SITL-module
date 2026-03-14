@@ -1,4 +1,5 @@
 import asyncio
+import json
 import pathlib
 import sys
 
@@ -12,127 +13,126 @@ if str(TESTS) not in sys.path:
     sys.path.insert(0, str(TESTS))
 
 import controller  # type: ignore  # noqa: E402
-import contracts  # type: ignore  # noqa: E402
-import state  # type: ignore  # noqa: E402
 from fakes import FakeRedis  # type: ignore  # noqa: E402
 
 
-COMMAND_TOPIC = "sitl/commands"
-HOME_TOPIC = "sitl-drone-home"
-STATE_TTL_SEC = 7200
+def build_command_payload() -> dict:
+    return {
+        "drone_id": "drone_001",
+        "msg_id": "msg-1",
+        "timestamp": "2026-03-14T10:00:00Z",
+        "nmea": {
+            "rmc": {
+                "talker_id": "GN",
+                "time": "123456.789",
+                "status": "A",
+                "latitude": "5545.1234",
+                "lat_dir": "N",
+                "longitude": "03737.5678",
+                "lon_dir": "E",
+                "speed_knots": 15.5,
+                "course_degrees": 270.0,
+                "date": "150625",
+            },
+            "gga": {
+                "talker_id": "GN",
+                "time": "123456.789",
+                "latitude": "5545.1234",
+                "lat_dir": "N",
+                "longitude": "03737.5678",
+                "lon_dir": "E",
+                "quality": 2,
+                "satellites": 10,
+                "hdop": 1.2,
+            },
+        },
+        "derived": {
+            "lat_decimal": 55.7558,
+            "lon_decimal": 37.6173,
+            "altitude_msl": 200.0,
+            "speed_vertical_ms": 2.5,
+        },
+        "actions": {
+            "drop": False,
+            "emergency_landing": False,
+        },
+    }
 
 
-def test_home_message_creates_armed_state_hash() -> None:
+def test_process_command_persists_expected_state_payload() -> None:
     async def scenario() -> None:
         redis_client = FakeRedis()
-        payload = {
-            "drone_id": "drone_001",
-            "home_lat": 59.9386,
-            "home_lon": 30.3141,
-            "home_alt": 120.0,
-        }
-        verified_message = contracts.build_verified_message(HOME_TOPIC, "HOME", payload)
+        payload = build_command_payload()
 
-        ok = await controller.process_verified_message(
-            redis_client,
-            verified_message,
-            COMMAND_TOPIC,
-            HOME_TOPIC,
-            STATE_TTL_SEC,
-        )
+        await controller.process_command(redis_client, payload)
 
-        stored_state = state.normalize_state(
-            await redis_client.hgetall(state.get_drone_state_key("drone_001"))
-        )
-        assert ok is True
-        assert stored_state["status"] == "ARMED"
-        assert stored_state["lat"] == 59.9386
-        assert stored_state["lon"] == 30.3141
-        assert stored_state["alt"] == 120.0
-        assert stored_state["speed_h_ms"] == 0.0
-        assert redis_client.expirations[state.get_drone_state_key("drone_001")] == STATE_TTL_SEC
+        stored = redis_client.decode_json("SITL:drone_001:state")
+        assert stored["drone_id"] == "drone_001"
+        assert stored["msg_id"] == "msg-1"
+        assert stored["nmea"]["gga"]["hdop"] == 1.2
+        assert stored["derived"]["speed_vertical_ms"] == 2.5
+        assert stored["actions"]["drop"] is False
+        assert redis_client.expirations["SITL:drone_001:state"] == controller.KEY_TTL
 
     asyncio.run(scenario())
 
 
-def test_command_is_ignored_until_home_is_known() -> None:
+def test_update_drone_position_rewrites_coordinates() -> None:
     async def scenario() -> None:
         redis_client = FakeRedis()
-        verified_message = contracts.build_verified_message(
-            COMMAND_TOPIC,
-            "COMMAND",
-            {
-                "drone_id": "drone_001",
-                "vx": 1.0,
-                "vy": 0.0,
-                "vz": 0.0,
-                "mag_heading": 15.0,
-            },
+        initial_state = build_command_payload()
+        initial_state["nmea"]["rmc"]["speed_knots"] = 10.0
+        initial_state["nmea"]["rmc"]["course_degrees"] = 90.0
+        await redis_client.set(
+            "SITL:drone_001:state",
+            json.dumps(initial_state),
+            ex=controller.KEY_TTL,
         )
 
-        ok = await controller.process_verified_message(
+        await controller.update_drone_position(
             redis_client,
-            verified_message,
-            COMMAND_TOPIC,
-            HOME_TOPIC,
-            STATE_TTL_SEC,
+            "SITL:drone_001:state",
+            1.0,
         )
 
-        assert ok is False
-        assert await redis_client.hgetall(state.get_drone_state_key("drone_001")) == {}
+        updated_state = redis_client.decode_json("SITL:drone_001:state")
+        assert updated_state["derived"]["lat_decimal"] == initial_state["derived"]["lat_decimal"]
+        assert updated_state["derived"]["lon_decimal"] > initial_state["derived"]["lon_decimal"]
+        assert "last_position_update" in updated_state
 
     asyncio.run(scenario())
 
 
-def test_command_updates_existing_hash_and_marks_drone_moving() -> None:
+def test_calculate_new_position_moves_north_for_zero_degree_course() -> None:
+    vx, vy = controller.course_to_vector(0.0)
+    new_lat, new_lon = controller.calculate_new_position(
+        59.9386,
+        30.3141,
+        vx,
+        vy,
+        5.0,
+        2.0,
+    )
+
+    assert new_lat > 59.9386
+    assert new_lon == 30.3141
+
+
+def test_update_drone_position_ignores_invalid_json() -> None:
     async def scenario() -> None:
         redis_client = FakeRedis()
-        home_message = contracts.build_verified_message(
-            HOME_TOPIC,
-            "HOME",
-            {
-                "drone_id": "drone_001",
-                "home_lat": 59.9386,
-                "home_lon": 30.3141,
-                "home_alt": 120.0,
-            },
-        )
-        command_message = contracts.build_verified_message(
-            COMMAND_TOPIC,
-            "COMMAND",
-            {
-                "drone_id": "drone_001",
-                "vx": 3.0,
-                "vy": 4.0,
-                "vz": 1.5,
-                "mag_heading": 90.0,
-            },
+        await redis_client.set(
+            "SITL:drone_001:state",
+            "{not-json",
+            ex=controller.KEY_TTL,
         )
 
-        await controller.process_verified_message(
+        await controller.update_drone_position(
             redis_client,
-            home_message,
-            COMMAND_TOPIC,
-            HOME_TOPIC,
-            STATE_TTL_SEC,
-        )
-        ok = await controller.process_verified_message(
-            redis_client,
-            command_message,
-            COMMAND_TOPIC,
-            HOME_TOPIC,
-            STATE_TTL_SEC,
+            "SITL:drone_001:state",
+            1.0,
         )
 
-        stored_state = state.normalize_state(
-            await redis_client.hgetall(state.get_drone_state_key("drone_001"))
-        )
-        assert ok is True
-        assert stored_state["status"] == "MOVING"
-        assert stored_state["vx"] == 3.0
-        assert stored_state["vy"] == 4.0
-        assert stored_state["vz"] == 1.5
-        assert stored_state["speed_h_ms"] == 5.0
-        assert stored_state["speed_v_ms"] == 1.5
+        assert redis_client.values["SITL:drone_001:state"] == "{not-json"
 
     asyncio.run(scenario())
