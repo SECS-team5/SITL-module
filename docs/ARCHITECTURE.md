@@ -28,7 +28,7 @@ last_update — timestamp последнего изменения вектора
 Адаптер должен состоять из **двух параллельных процессов (или асинхронных задач)**:
 
 **Поток А: Приемник (Listener)**  
-Слушает MQTT топики `sitl/commands` и `sitl-drone-home`.  
+Слушает MQTT топики `sitl.commands` и `sitl-drone-home`.  
 При получении команды — просто делает **HSET** в Redis для соответствующего `drone_id`. Никаких расчетов здесь не делается.
 
 **Поток Б: Вычислитель (Ticker 10 Hz)**  
@@ -43,14 +43,14 @@ last_update — timestamp последнего изменения вектора
 - Контейнеризация — схемы в `schemas/` как Volume в Docker
 
 ### Базовые принципы (интерпретация для SITL)
-- Взаимодействие только через брокер сообщений (`sitl/commands`, `sitl-drone-home`)
+- Взаимодействие только через брокер сообщений (`sitl.commands`, `sitl-drone-home`)
 - Выдача событий безопасности по запросу через REST API
-- Передача телеметрии в сервис аналитики (`sitl/telemetry`)
-- Передача событий безопасности в сервис аналитики (`sitl/safety-events`)
+- Передача телеметрии в сервис аналитики (`sitl.telemetry`)
+- Передача событий безопасности в сервис аналитики (`sitl.safety-events`)
 - События записываются в журнал с `msg_id + timestamp`
 
 ## 1. Схема входных команд от Приводов
-**Топик**: `sitl/commands`
+**Топик**: `sitl.commands`
 ```json
 {
   "type": "object",
@@ -102,13 +102,26 @@ last_update: "2026-03-12T21:35:00Z"  # ISO timestamp (string)
 ```
  
 ## 4. SITL-адаптер отправляет:
+Запрос (дрон -> SITL)
 ```
-GET /api/v1/drones/{drone_id}/position
- {
-    "lat": 59.9386,
-    "lon": 30.3165,
-    "alt": 100.2
+POST .api.v1.drones.telemetry.request
+Content-Type: application.json
+
+{
+  "drone_id": ["drone_001"]
+}
+
+```
+Ответ (SITL -> дрон)
+```
+{
+  "drone_001": {
+    "lat": 59.938623,
+    "lon": 30.316534,
+    "alt": 100.2,
   }
+}
+
 ```
 
 ## 5. Архитектура
