@@ -104,7 +104,6 @@ last_update: "2026-03-12T21:35:00Z"  # ISO timestamp (string)
 ## 4. SITL-адаптер отправляет:
 Запрос (дрон -> SITL)
 ```
-POST .api.v1.drones.telemetry.request
 Content-Type: application.json
 
 {
@@ -115,11 +114,9 @@ Content-Type: application.json
 Ответ (SITL -> дрон)
 ```
 {
-  "drone_001": {
     "lat": 59.938623,
     "lon": 30.316534,
     "alt": 100.2,
-  }
 }
 
 ```
