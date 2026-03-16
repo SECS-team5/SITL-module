@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["drone_id", "vx", "vy", "vz", "mag_heading"],
+  "properties": {
+    "drone_id": {
+      "type": "string",
+      "pattern": "^drone_[0-9]{3,4}$"
+    },
+    "vx": {
+      "type": "number",
+      "minimum": -50,
+      "maximum": 50
+    },
+    "vy": {
+      "type": "number",
+      "minimum": -50,
+      "maximum": 50
+    },
+    "vz": {
+      "type": "number",
+      "minimum": -10,
+      "maximum": 10
+    },
+    "mag_heading": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 359.9
+    }
+  }
+}
