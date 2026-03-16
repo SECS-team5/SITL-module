@@ -1,21 +1,15 @@
 import asyncio
-import json
 import logging
 import os
 from typing import Any
 
 import redis.asyncio as redis
-from aiokafka import AIOKafkaConsumer
-from aiokafka import AIOKafkaProducer
 
-from contracts import build_request_headers
-from contracts import decode_headers
-from contracts import get_transport_value
-from contracts import parse_json_payload
 from contracts import POSITION_REQUEST_SCHEMA_NAME
 from contracts import POSITION_REQUEST_TOPIC_DEFAULT
 from contracts import POSITION_RESPONSE_TOPIC_DEFAULT
 from contracts import validate_schema
+from messaging import KafkaRequestResponder
 from state import advance_drone_state
 from state import build_position_response
 from state import normalize_state
@@ -96,56 +90,15 @@ async def resolve_position_request(
     return response, ""
 
 
-async def position_request_processor_task(
+async def handle_position_request(
     r: redis.Redis,
-    kafka_servers: str,
-    request_topic: str,
-    default_response_topic: str,
-) -> None:
-    producer = AIOKafkaProducer(
-        bootstrap_servers=kafka_servers,
-        value_serializer=lambda value: json.dumps(value).encode(),
-    )
-    consumer = AIOKafkaConsumer(
-        request_topic,
-        bootstrap_servers=kafka_servers,
-        group_id="SITL-position-service-v1",
-    )
-
-    await producer.start()
-    await consumer.start()
-    log.info(
-        "Position responder started. request_topic=%s response_topic=%s",
-        request_topic,
-        default_response_topic,
-    )
-
-    try:
-        async for msg in consumer:
-            payload = parse_json_payload(msg.value)
-            if payload is None:
-                log.warning("Rejected position request from topic=%s: invalid JSON payload", msg.topic)
-                continue
-
-            response, reason = await resolve_position_request(r, payload)
-            if response is None:
-                log.warning("Rejected position request: %s", reason)
-                continue
-
-            headers = decode_headers(msg.headers)
-            reply_to = get_transport_value(payload, headers, "reply_to") or default_response_topic
-            correlation_id = get_transport_value(payload, headers, "correlation_id")
-            response_headers = build_request_headers(correlation_id, reply_to) if correlation_id else []
-
-            await producer.send_and_wait(
-                reply_to,
-                response,
-                headers=response_headers or None,
-            )
-            log.info("Returned position for drone_id=%s reply_to=%s", payload["drone_id"], reply_to)
-    finally:
-        await producer.stop()
-        await consumer.stop()
+    payload: dict[str, Any],
+) -> dict[str, float] | None:
+    response, reason = await resolve_position_request(r, payload)
+    if response is None:
+        log.warning("Rejected position request: %s", reason)
+        return None
+    return response
 
 
 async def main() -> None:
@@ -156,6 +109,7 @@ async def main() -> None:
     request_topic = os.getenv("POSITION_REQUEST_TOPIC", POSITION_REQUEST_TOPIC_DEFAULT)
     response_topic = os.getenv("POSITION_RESPONSE_TOPIC", POSITION_RESPONSE_TOPIC_DEFAULT)
     r = redis.from_url(redis_url, decode_responses=True)
+    responder = KafkaRequestResponder(kafka_servers)
 
     log.info(
         "Core started. redis=%s kafka=%s position_request=%s",
@@ -164,10 +118,13 @@ async def main() -> None:
         request_topic,
     )
 
+    async def position_request_handler(payload: dict[str, Any]) -> dict[str, float] | None:
+        return await handle_position_request(r, payload)
+
     try:
         await asyncio.gather(
             position_updater_task(r, update_hz, state_ttl_sec),
-            position_request_processor_task(r, kafka_servers, request_topic, response_topic),
+            responder.serve(request_topic, position_request_handler, response_topic),
         )
     finally:
         await r.aclose()
