@@ -12,8 +12,10 @@ import contracts  # type: ignore  # noqa: E402
 import verifier  # type: ignore  # noqa: E402
 
 
-COMMAND_TOPIC = "sitl/commands"
+COMMAND_TOPIC = "sitl-commands"
 HOME_TOPIC = "sitl-drone-home"
+VERIFIED_COMMAND_TOPIC = "sitl-verified-commands"
+VERIFIED_HOME_TOPIC = "sitl-verified-home"
 
 
 def test_parse_json_payload_accepts_dict_bytes_and_string() -> None:
@@ -31,7 +33,7 @@ def test_process_input_message_accepts_valid_command_message() -> None:
         "vz": 0.5,
         "mag_heading": 90.0,
     }
-    ok, verified_message, reason = verifier.process_input_message(
+    ok, message_type, validated_payload, reason = verifier.process_input_message(
         COMMAND_TOPIC,
         json.dumps(payload).encode(),
         COMMAND_TOPIC,
@@ -40,11 +42,13 @@ def test_process_input_message_accepts_valid_command_message() -> None:
 
     assert ok is True
     assert reason == ""
-    assert verified_message is not None
-    assert verified_message["message_type"] == "COMMAND"
-    assert verified_message["data"] == payload
-    assert verified_message["input_topic"] == COMMAND_TOPIC
-    assert contracts.is_iso_timestamp(verified_message["verified_at"]) is True
+    assert message_type == "COMMAND"
+    assert validated_payload == payload
+    assert contracts.resolve_verified_topic(
+        message_type,
+        VERIFIED_COMMAND_TOPIC,
+        VERIFIED_HOME_TOPIC,
+    ) == VERIFIED_COMMAND_TOPIC
 
 
 def test_process_input_message_accepts_valid_home_message() -> None:
@@ -54,7 +58,7 @@ def test_process_input_message_accepts_valid_home_message() -> None:
         "home_lon": 30.3141,
         "home_alt": 100.0,
     }
-    ok, verified_message, reason = verifier.process_input_message(
+    ok, message_type, validated_payload, reason = verifier.process_input_message(
         HOME_TOPIC,
         payload,
         COMMAND_TOPIC,
@@ -63,9 +67,13 @@ def test_process_input_message_accepts_valid_home_message() -> None:
 
     assert ok is True
     assert reason == ""
-    assert verified_message is not None
-    assert verified_message["message_type"] == "HOME"
-    assert verified_message["data"] == payload
+    assert message_type == "HOME"
+    assert validated_payload == payload
+    assert contracts.resolve_verified_topic(
+        message_type,
+        VERIFIED_COMMAND_TOPIC,
+        VERIFIED_HOME_TOPIC,
+    ) == VERIFIED_HOME_TOPIC
 
 
 def test_process_input_message_rejects_missing_required_command_field() -> None:
@@ -75,7 +83,7 @@ def test_process_input_message_rejects_missing_required_command_field() -> None:
         "vy": -1.0,
         "mag_heading": 90.0,
     }
-    ok, verified_message, reason = verifier.process_input_message(
+    ok, message_type, validated_payload, reason = verifier.process_input_message(
         COMMAND_TOPIC,
         payload,
         COMMAND_TOPIC,
@@ -83,7 +91,8 @@ def test_process_input_message_rejects_missing_required_command_field() -> None:
     )
 
     assert ok is False
-    assert verified_message is None
+    assert message_type is None
+    assert validated_payload is None
     assert "required property" in reason
     assert "vz" in reason
 
@@ -96,7 +105,7 @@ def test_process_input_message_rejects_additional_fields() -> None:
         "home_alt": 100.0,
         "unexpected": "value",
     }
-    ok, verified_message, reason = verifier.process_input_message(
+    ok, message_type, validated_payload, reason = verifier.process_input_message(
         HOME_TOPIC,
         payload,
         COMMAND_TOPIC,
@@ -104,7 +113,8 @@ def test_process_input_message_rejects_additional_fields() -> None:
     )
 
     assert ok is False
-    assert verified_message is None
+    assert message_type is None
+    assert validated_payload is None
     assert "Additional properties are not allowed" in reason
 
 
@@ -116,7 +126,7 @@ def test_process_input_message_rejects_out_of_range_heading() -> None:
         "vz": 0.0,
         "mag_heading": 400.0,
     }
-    ok, verified_message, reason = verifier.process_input_message(
+    ok, message_type, validated_payload, reason = verifier.process_input_message(
         COMMAND_TOPIC,
         payload,
         COMMAND_TOPIC,
@@ -124,40 +134,20 @@ def test_process_input_message_rejects_out_of_range_heading() -> None:
     )
 
     assert ok is False
-    assert verified_message is None
+    assert message_type is None
+    assert validated_payload is None
     assert "359.9" in reason
 
 
 def test_process_input_message_rejects_unsupported_topic() -> None:
-    ok, verified_message, reason = verifier.process_input_message(
-        "sitl/unknown",
+    ok, message_type, validated_payload, reason = verifier.process_input_message(
+        "sitl-unknown",
         {"drone_id": "drone_001"},
         COMMAND_TOPIC,
         HOME_TOPIC,
     )
 
     assert ok is False
-    assert verified_message is None
+    assert message_type is None
+    assert validated_payload is None
     assert "unsupported topic" in reason
-
-
-def test_validate_verified_message_rejects_message_type_topic_mismatch() -> None:
-    verified_message = contracts.build_verified_message(
-        COMMAND_TOPIC,
-        "HOME",
-        {
-            "drone_id": "drone_001",
-            "vx": 0.0,
-            "vy": 0.0,
-            "vz": 0.0,
-            "mag_heading": 0.0,
-        },
-    )
-    ok, reason = contracts.validate_verified_message(
-        verified_message,
-        COMMAND_TOPIC,
-        HOME_TOPIC,
-    )
-
-    assert ok is False
-    assert "does not match input topic" in reason
