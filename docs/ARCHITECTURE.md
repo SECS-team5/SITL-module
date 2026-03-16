@@ -101,8 +101,8 @@ last_update: "2026-03-12T21:35:00Z"  # ISO timestamp (string)
 
 ```
  
-## 4. SITL-адаптер отправляет:
-Запрос (дрон -> SITL)
+## 4. Запрос телеметрии в SITL-адаптере:
+Запрос в sitl.telemetry.request: (дрон -> SITL)
 ```
 Content-Type: application.json
 
