@@ -12,7 +12,7 @@ if str(TESTS) not in sys.path:
     sys.path.insert(0, str(TESTS))
 
 import controller  # type: ignore  # noqa: E402
-import core  # type: ignore  # noqa: E402
+import messaging  # type: ignore  # noqa: E402
 import verifier  # type: ignore  # noqa: E402
 from fakes import FakeRedis  # type: ignore  # noqa: E402
 
@@ -79,7 +79,7 @@ def test_end_to_end_flow_from_verifier_to_position_response() -> None:
             7200,
         )
 
-        response, reason = await core.resolve_position_request(
+        response, reason = await messaging.resolve_position_request(
             redis_client,
             {"drone_id": "drone_001"},
         )

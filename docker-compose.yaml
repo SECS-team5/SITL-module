@@ -108,12 +108,30 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379
+      UPDATE_FREQUENCY_HZ: 10.0
+      STATE_TTL_SEC: 7200
+
+  messaging:
+    restart: on-failure
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        WORKDIR /app
+        COPY requirements.txt .
+        RUN pip install --no-cache-dir -r requirements.txt
+        COPY src/ ./src/
+        COPY schemas/ ./schemas/
+        CMD ["python", "src/messaging.py"]
+    depends_on:
+      redis:
+        condition: service_healthy
       kafka:
         condition: service_healthy
     environment:
       KAFKA_SERVERS: kafka:29092
       REDIS_URL: redis://redis:6379
-      UPDATE_FREQUENCY_HZ: 10.0
       POSITION_REQUEST_TOPIC: sitl-position-request
       POSITION_RESPONSE_TOPIC: sitl-position-response
-      STATE_TTL_SEC: 7200

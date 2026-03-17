@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from abc import ABC
 from abc import abstractmethod
 from typing import Any
@@ -7,6 +8,8 @@ from typing import Awaitable
 from typing import Callable
 from typing import Optional
 
+import asyncio
+import redis.asyncio as redis
 from aiokafka import AIOKafkaConsumer
 from aiokafka import AIOKafkaProducer
 
@@ -14,9 +17,15 @@ from contracts import build_request_headers
 from contracts import decode_headers
 from contracts import get_transport_value
 from contracts import parse_json_payload
+from contracts import POSITION_REQUEST_SCHEMA_NAME
+from contracts import POSITION_REQUEST_TOPIC_DEFAULT
+from contracts import POSITION_RESPONSE_TOPIC_DEFAULT
 from contracts import POSITION_RESPONSE_SCHEMA_NAME
 from contracts import validate_schema
+from state import build_position_response
+from state import normalize_state
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
 RequestHandler = Callable[[dict[str, Any]], Awaitable[Optional[dict[str, Any]]]]
@@ -35,6 +44,41 @@ class RequestResponder(ABC):
 
         Использует correlation_id и reply_to из transport metadata.
         """
+
+
+async def resolve_position_request(
+    r: redis.Redis,
+    payload: dict[str, Any],
+) -> tuple[dict[str, float] | None, str]:
+    ok, reason = validate_schema(
+        payload,
+        POSITION_REQUEST_SCHEMA_NAME,
+        allow_transport_fields=True,
+    )
+    if not ok:
+        return None, reason
+
+    drone_id = payload["drone_id"]
+    raw_state = await r.hgetall(f"drone:{drone_id}:state")
+    if not raw_state:
+        return None, f"drone '{drone_id}' state not found"
+
+    response = build_position_response(normalize_state(raw_state))
+    if response is None:
+        return None, f"drone '{drone_id}' state does not contain a valid position"
+
+    return response, ""
+
+
+async def handle_position_request(
+    r: redis.Redis,
+    payload: dict[str, Any],
+) -> dict[str, float] | None:
+    response, reason = await resolve_position_request(r, payload)
+    if response is None:
+        log.warning("Rejected position request: %s", reason)
+        return None
+    return response
 
 
 async def dispatch_request_message(
@@ -133,3 +177,31 @@ class KafkaRequestResponder(RequestResponder):
         finally:
             await consumer.stop()
             await self.stop()
+
+
+async def main() -> None:
+    redis_url = os.getenv("REDIS_URL", "redis://redis:6379")
+    kafka_servers = os.getenv("KAFKA_SERVERS", "kafka:9092")
+    request_topic = os.getenv("POSITION_REQUEST_TOPIC", POSITION_REQUEST_TOPIC_DEFAULT)
+    response_topic = os.getenv("POSITION_RESPONSE_TOPIC", POSITION_RESPONSE_TOPIC_DEFAULT)
+    r = redis.from_url(redis_url, decode_responses=True)
+    responder = KafkaRequestResponder(kafka_servers)
+
+    log.info(
+        "Messaging started. redis=%s kafka=%s request_topic=%s",
+        redis_url,
+        kafka_servers,
+        request_topic,
+    )
+
+    async def position_request_handler(payload: dict[str, Any]) -> dict[str, float] | None:
+        return await handle_position_request(r, payload)
+
+    try:
+        await responder.serve(request_topic, position_request_handler, response_topic)
+    finally:
+        await r.aclose()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
