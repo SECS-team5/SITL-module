@@ -1,6 +1,8 @@
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
+    restart: unless-stopped
+    stop_grace_period: 20s
     healthcheck:
       test: ["CMD-SHELL", "echo srvr | nc -w 2 localhost 2181 | grep 'Zookeeper version' || exit 1"]
       interval: 10s
@@ -12,6 +14,8 @@ services:
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
+    restart: on-failure
+    stop_grace_period: 30s
     depends_on:
       zookeeper:
         condition: service_healthy
@@ -25,6 +29,8 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ZOOKEEPER_SESSION_TIMEOUT_MS: 6000
+      KAFKA_ZOOKEEPER_CONNECTION_TIMEOUT_MS: 6000
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
@@ -102,12 +108,30 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379
+      UPDATE_FREQUENCY_HZ: 10.0
+      STATE_TTL_SEC: 7200
+
+  messaging:
+    restart: on-failure
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        WORKDIR /app
+        COPY requirements.txt .
+        RUN pip install --no-cache-dir -r requirements.txt
+        COPY src/ ./src/
+        COPY schemas/ ./schemas/
+        CMD ["python", "src/messaging.py"]
+    depends_on:
+      redis:
+        condition: service_healthy
       kafka:
         condition: service_healthy
     environment:
       KAFKA_SERVERS: kafka:29092
       REDIS_URL: redis://redis:6379
-      UPDATE_FREQUENCY_HZ: 10.0
       POSITION_REQUEST_TOPIC: sitl-position-request
       POSITION_RESPONSE_TOPIC: sitl-position-response
-      STATE_TTL_SEC: 7200
