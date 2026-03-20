@@ -16,10 +16,10 @@ POSITION_RESPONSE_SCHEMA_NAME = "sitl-position-response.json"
 VERIFIER_STAGE = "SITL-v1"
 TRANSPORT_FIELDS = frozenset({"correlation_id", "reply_to"})
 SCHEMAS_DIR = Path(__file__).resolve().parents[1] / "schemas"
-VERIFIED_COMMAND_TOPIC_DEFAULT = "sitl-verified-commands"
-VERIFIED_HOME_TOPIC_DEFAULT = "sitl-verified-home"
-POSITION_REQUEST_TOPIC_DEFAULT = "sitl-position-request"
-POSITION_RESPONSE_TOPIC_DEFAULT = "sitl-position-response"
+VERIFIED_COMMAND_TOPIC_DEFAULT = "sitl.verified-commands"
+VERIFIED_HOME_TOPIC_DEFAULT = "sitl.verified-home"
+POSITION_REQUEST_TOPIC_DEFAULT = "sitl.telemetry.request"
+POSITION_RESPONSE_TOPIC_DEFAULT = "sitl.telemetry.response"
 
 
 def parse_json_payload(raw: Any) -> dict[str, Any] | None:

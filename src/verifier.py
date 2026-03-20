@@ -50,7 +50,7 @@ def process_input_message(
 
 async def main() -> None:
     kafka_servers = os.getenv("KAFKA_SERVERS", "kafka:9092")
-    commands_topic = os.getenv("COMMAND_TOPIC", "sitl-commands")
+    commands_topic = os.getenv("COMMAND_TOPIC", "sitl.commands")
     home_topic = os.getenv("HOME_TOPIC", "sitl-drone-home")
     input_topics = parse_csv_env("INPUT_TOPICS", f"{commands_topic},{home_topic}")
     verified_commands_topic = os.getenv(
