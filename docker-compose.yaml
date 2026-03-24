@@ -23,7 +23,8 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -59,7 +60,7 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      KAFKA_SERVERS: kafka:9092
+      KAFKA_SERVERS: kafka:29092
       INPUT_TOPICS: "sitl.commands,sitl-drone-home"
       COMMAND_TOPIC: sitl.commands
       HOME_TOPIC: sitl-drone-home
@@ -79,7 +80,7 @@ services:
       redis:
         condition: service_healthy
     environment:
-      KAFKA_SERVERS: kafka:9092
+      KAFKA_SERVERS: kafka:29092
       REDIS_URL: redis://redis:6379
       VERIFIED_COMMAND_TOPIC: sitl.verified-commands
       VERIFIED_HOME_TOPIC: sitl.verified-home
@@ -113,7 +114,7 @@ services:
       redis:
         condition: service_healthy
     environment:
-      KAFKA_SERVERS: kafka:9092
+      KAFKA_SERVERS: kafka:29092
       REDIS_URL: redis://redis:6379
       POSITION_REQUEST_TOPIC: sitl.telemetry.request
       POSITION_RESPONSE_TOPIC: sitl.telemetry.response
