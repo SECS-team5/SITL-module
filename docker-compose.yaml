@@ -54,6 +54,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: sitl-verifier
+    command: ["python", "-u", "src/verifier.py"]
     depends_on:
       kafka:
         condition: service_healthy
@@ -71,6 +72,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: sitl-controller
+    command: ["python", "-u", "src/controller.py"]
     depends_on:
       kafka:
         condition: service_healthy
@@ -89,6 +91,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: sitl-core
+    command: ["python", "-u", "src/core.py"]
     depends_on:
       redis:
         condition: service_healthy
@@ -103,6 +106,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: sitl-messaging
+    command: ["python", "-u", "src/messaging.py"]
     depends_on:
       kafka:
         condition: service_healthy
