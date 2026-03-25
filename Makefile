@@ -15,5 +15,4 @@ test:
 		<<< '{"id": "test", "drone_id": "SITL-001", "type": "HEARTBEAT"}'
 
 clean:
-	docker-compose down -v
-	docker system prune -f
+	docker compose down --volumes --remove-orphans
