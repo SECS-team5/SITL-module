@@ -12,6 +12,10 @@
     },
     "alt": {
       "type": "number"
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1
     }
   }
 }

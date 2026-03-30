@@ -7,6 +7,14 @@
     "drone_id": {
       "type": "string",
       "pattern": "^drone_[0-9]{3,4}$"
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reply_to": {
+      "type": "string",
+      "minLength": 1
     }
   }
 }

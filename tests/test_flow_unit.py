@@ -17,10 +17,10 @@ import verifier  # type: ignore  # noqa: E402
 from fakes import FakeRedis  # type: ignore  # noqa: E402
 
 
-COMMAND_TOPIC = "sitl-commands"
+COMMAND_TOPIC = "sitl.commands"
 HOME_TOPIC = "sitl-drone-home"
-VERIFIED_COMMAND_TOPIC = "sitl-verified-commands"
-VERIFIED_HOME_TOPIC = "sitl-verified-home"
+VERIFIED_COMMAND_TOPIC = "sitl.verified-commands"
+VERIFIED_HOME_TOPIC = "sitl.verified-home"
 
 
 def test_end_to_end_flow_from_verifier_to_position_response() -> None:

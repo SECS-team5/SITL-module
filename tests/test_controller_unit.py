@@ -16,8 +16,8 @@ import state  # type: ignore  # noqa: E402
 from fakes import FakeRedis  # type: ignore  # noqa: E402
 
 
-VERIFIED_COMMAND_TOPIC = "sitl-verified-commands"
-VERIFIED_HOME_TOPIC = "sitl-verified-home"
+VERIFIED_COMMAND_TOPIC = "sitl.verified-commands"
+VERIFIED_HOME_TOPIC = "sitl.verified-home"
 STATE_TTL_SEC = 7200
 
 

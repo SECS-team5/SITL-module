@@ -12,10 +12,10 @@ import contracts  # type: ignore  # noqa: E402
 import verifier  # type: ignore  # noqa: E402
 
 
-COMMAND_TOPIC = "sitl-commands"
+COMMAND_TOPIC = "sitl.commands"
 HOME_TOPIC = "sitl-drone-home"
-VERIFIED_COMMAND_TOPIC = "sitl-verified-commands"
-VERIFIED_HOME_TOPIC = "sitl-verified-home"
+VERIFIED_COMMAND_TOPIC = "sitl.verified-commands"
+VERIFIED_HOME_TOPIC = "sitl.verified-home"
 
 
 def test_parse_json_payload_accepts_dict_bytes_and_string() -> None:
