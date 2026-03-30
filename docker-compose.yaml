@@ -1,6 +1,6 @@
 services:
-  # --- Infrastructure ---
   zookeeper:
+    profiles: ["kafka"]
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: sitl-zookeeper
     environment:
@@ -13,6 +13,7 @@ services:
       retries: 5
 
   kafka:
+    profiles: ["kafka"]
     image: confluentinc/cp-kafka:7.5.0
     container_name: sitl-kafka
     depends_on:
@@ -35,6 +36,20 @@ services:
       timeout: 10s
       retries: 5
 
+  mosquitto:
+    profiles: ["mqtt"]
+    image: eclipse-mosquitto:2.0
+    container_name: sitl-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-h", "localhost", "-p", "1883", "-t", "$$SYS/broker/version", "-C", "1", "-W", "5"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
   redis:
     image: redis:7-alpine
     container_name: sitl-redis
@@ -49,23 +64,25 @@ services:
       timeout: 5s
       retries: 5
 
-  # --- Application Services ---
   verifier:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: sitl-verifier
     command: ["python", "-u", "src/verifier.py"]
-    depends_on:
-      kafka:
-        condition: service_healthy
     environment:
-      KAFKA_SERVERS: kafka:29092
-      INPUT_TOPICS: "sitl.commands,sitl-drone-home"
-      COMMAND_TOPIC: sitl.commands
-      HOME_TOPIC: sitl-drone-home
-      VERIFIED_COMMAND_TOPIC: sitl.verified-commands
-      VERIFIED_HOME_TOPIC: sitl.verified-home
+      BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
+      KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
+      MQTT_HOST: ${MQTT_HOST:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_QOS: ${MQTT_QOS:-1}
+      INPUT_TOPICS: ${INPUT_TOPICS:-sitl.commands,sitl-drone-home}
+      COMMAND_TOPIC: ${COMMAND_TOPIC:-sitl.commands}
+      HOME_TOPIC: ${HOME_TOPIC:-sitl-drone-home}
+      VERIFIED_COMMAND_TOPIC: ${VERIFIED_COMMAND_TOPIC:-sitl.verified-commands}
+      VERIFIED_HOME_TOPIC: ${VERIFIED_HOME_TOPIC:-sitl.verified-home}
     restart: unless-stopped
 
   controller:
@@ -75,16 +92,20 @@ services:
     container_name: sitl-controller
     command: ["python", "-u", "src/controller.py"]
     depends_on:
-      kafka:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
-      KAFKA_SERVERS: kafka:29092
-      REDIS_URL: redis://redis:6379
-      VERIFIED_COMMAND_TOPIC: sitl.verified-commands
-      VERIFIED_HOME_TOPIC: sitl.verified-home
-      STATE_TTL_SEC: "7200"
+      BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
+      KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
+      MQTT_HOST: ${MQTT_HOST:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_QOS: ${MQTT_QOS:-1}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      VERIFIED_COMMAND_TOPIC: ${VERIFIED_COMMAND_TOPIC:-sitl.verified-commands}
+      VERIFIED_HOME_TOPIC: ${VERIFIED_HOME_TOPIC:-sitl.verified-home}
+      STATE_TTL_SEC: ${STATE_TTL_SEC:-7200}
     restart: unless-stopped
 
   core:
@@ -97,9 +118,9 @@ services:
       redis:
         condition: service_healthy
     environment:
-      REDIS_URL: redis://redis:6379
-      UPDATE_FREQUENCY_HZ: "10.0"
-      STATE_TTL_SEC: "7200"
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      UPDATE_FREQUENCY_HZ: ${UPDATE_FREQUENCY_HZ:-10.0}
+      STATE_TTL_SEC: ${STATE_TTL_SEC:-7200}
     restart: unless-stopped
 
   messaging:
@@ -109,15 +130,19 @@ services:
     container_name: sitl-messaging
     command: ["python", "-u", "src/messaging.py"]
     depends_on:
-      kafka:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
-      KAFKA_SERVERS: kafka:29092
-      REDIS_URL: redis://redis:6379
-      POSITION_REQUEST_TOPIC: sitl.telemetry.request
-      POSITION_RESPONSE_TOPIC: sitl.telemetry.response
+      BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
+      KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
+      MQTT_HOST: ${MQTT_HOST:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USERNAME: ${MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_QOS: ${MQTT_QOS:-1}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      POSITION_REQUEST_TOPIC: ${POSITION_REQUEST_TOPIC:-sitl.telemetry.request}
+      POSITION_RESPONSE_TOPIC: ${POSITION_RESPONSE_TOPIC:-sitl.telemetry.response}
     restart: unless-stopped
 
 volumes:
