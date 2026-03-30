@@ -14,7 +14,6 @@ HOME_SCHEMA_NAME = "sitl-drone-home.json"
 POSITION_REQUEST_SCHEMA_NAME = "sitl-position-request.json"
 POSITION_RESPONSE_SCHEMA_NAME = "sitl-position-response.json"
 VERIFIER_STAGE = "SITL-v1"
-TRANSPORT_FIELDS = frozenset({"correlation_id", "reply_to"})
 SCHEMAS_DIR = Path(__file__).resolve().parents[1] / "schemas"
 VERIFIED_COMMAND_TOPIC_DEFAULT = "sitl.verified-commands"
 VERIFIED_HOME_TOPIC_DEFAULT = "sitl.verified-home"
@@ -54,14 +53,6 @@ def get_validator(schema_name: str) -> Draft202012Validator:
     return Draft202012Validator(load_schema(schema_name))
 
 
-def strip_transport_fields(payload: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: value
-        for key, value in payload.items()
-        if key not in TRANSPORT_FIELDS
-    }
-
-
 def format_validation_error(schema_name: str, errors: Iterable[Any]) -> str:
     first_error = sorted(errors, key=lambda item: list(item.absolute_path))[0]
     path = ".".join(str(part) for part in first_error.absolute_path) or "$"
@@ -71,10 +62,8 @@ def format_validation_error(schema_name: str, errors: Iterable[Any]) -> str:
 def validate_schema(
     payload: dict[str, Any],
     schema_name: str,
-    allow_transport_fields: bool = False,
 ) -> Tuple[bool, str]:
-    candidate = strip_transport_fields(payload) if allow_transport_fields else payload
-    errors = list(get_validator(schema_name).iter_errors(candidate))
+    errors = list(get_validator(schema_name).iter_errors(payload))
     if errors:
         return False, format_validation_error(schema_name, errors)
     return True, ""

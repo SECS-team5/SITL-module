@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 from abc import ABC
@@ -10,8 +9,10 @@ from typing import Optional
 
 import asyncio
 import redis.asyncio as redis
-from aiokafka import AIOKafkaConsumer
-from aiokafka import AIOKafkaProducer
+from broker import BrokerClient
+from broker import create_broker_client_from_env
+from broker import iter_broker_messages_with_retry
+from broker import start_broker_with_retry
 
 from contracts import build_request_headers
 from contracts import decode_headers
@@ -50,11 +51,7 @@ async def resolve_position_request(
     r: redis.Redis,
     payload: dict[str, Any],
 ) -> tuple[dict[str, float] | None, str]:
-    ok, reason = validate_schema(
-        payload,
-        POSITION_REQUEST_SCHEMA_NAME,
-        allow_transport_fields=True,
-    )
+    ok, reason = validate_schema(payload, POSITION_REQUEST_SCHEMA_NAME)
     if not ok:
         return None, reason
 
@@ -82,7 +79,7 @@ async def handle_position_request(
 
 
 async def dispatch_request_message(
-    producer: Any,
+    publisher: Any,
     raw_payload: Any,
     raw_headers: list[tuple[str, bytes]] | None,
     handler: RequestHandler,
@@ -101,37 +98,31 @@ async def dispatch_request_message(
     if response is None:
         return False, "handler returned no response", drone_id
 
-    ok, reason = validate_schema(response, POSITION_RESPONSE_SCHEMA_NAME)
+    response_payload = dict(response)
+    if correlation_id:
+        response_payload["correlation_id"] = correlation_id
+
+    ok, reason = validate_schema(response_payload, POSITION_RESPONSE_SCHEMA_NAME)
     if not ok:
         return False, reason, drone_id
 
     response_headers = build_request_headers(correlation_id, reply_to) if correlation_id else None
-    await producer.send_and_wait(
+    await publisher.publish(
         reply_to,
-        response,
+        response_payload,
         headers=response_headers,
     )
     return True, reply_to, drone_id
 
 
-class KafkaRequestResponder(RequestResponder):
+class BrokerRequestResponder(RequestResponder):
     def __init__(
         self,
-        kafka_servers: str,
+        broker: BrokerClient,
         consumer_group_id: str = "SITL-position-service-v1",
     ) -> None:
-        self.kafka_servers = kafka_servers
+        self.broker = broker
         self.consumer_group_id = consumer_group_id
-        self._producer = AIOKafkaProducer(
-            bootstrap_servers=kafka_servers,
-            value_serializer=lambda value: json.dumps(value).encode(),
-        )
-
-    async def start(self) -> None:
-        await self._producer.start()
-
-    async def stop(self) -> None:
-        await self._producer.stop()
 
     async def serve(
         self,
@@ -139,14 +130,7 @@ class KafkaRequestResponder(RequestResponder):
         handler: RequestHandler,
         default_response_topic: str,
     ) -> None:
-        consumer = AIOKafkaConsumer(
-            topic,
-            bootstrap_servers=self.kafka_servers,
-            group_id=self.consumer_group_id,
-        )
-
-        await self.start()
-        await consumer.start()
+        await start_broker_with_retry(self.broker, log, "Messaging broker")
         log.info(
             "Request responder started. request_topic=%s response_topic=%s",
             topic,
@@ -154,11 +138,17 @@ class KafkaRequestResponder(RequestResponder):
         )
 
         try:
-            async for msg in consumer:
+            async for msg in iter_broker_messages_with_retry(
+                self.broker,
+                [topic],
+                log,
+                "Messaging broker",
+                group_id=self.consumer_group_id,
+            ):
                 try:
                     ok, detail, drone_id = await dispatch_request_message(
-                        self._producer,
-                        msg.value,
+                        self.broker,
+                        msg.payload,
                         msg.headers,
                         handler,
                         default_response_topic,
@@ -175,22 +165,20 @@ class KafkaRequestResponder(RequestResponder):
                 except Exception as exc:
                     log.error("Failed to process request from topic=%s: %s", msg.topic, exc, exc_info=True)
         finally:
-            await consumer.stop()
-            await self.stop()
+            await self.broker.stop()
 
 
 async def main() -> None:
     redis_url = os.getenv("REDIS_URL", "redis://redis:6379")
-    kafka_servers = os.getenv("KAFKA_SERVERS", "kafka:9092")
     request_topic = os.getenv("POSITION_REQUEST_TOPIC", POSITION_REQUEST_TOPIC_DEFAULT)
     response_topic = os.getenv("POSITION_RESPONSE_TOPIC", POSITION_RESPONSE_TOPIC_DEFAULT)
     r = redis.from_url(redis_url, decode_responses=True)
-    responder = KafkaRequestResponder(kafka_servers)
+    broker = create_broker_client_from_env()
+    responder = BrokerRequestResponder(broker)
 
     log.info(
-        "Messaging started. redis=%s kafka=%s request_topic=%s",
+        "Messaging started. redis=%s request_topic=%s",
         redis_url,
-        kafka_servers,
         request_topic,
     )
 

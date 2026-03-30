@@ -4,10 +4,11 @@ import os
 from typing import Any
 
 import redis.asyncio as redis
-from aiokafka import AIOKafkaConsumer
+from broker import create_broker_client_from_env
+from broker import iter_broker_messages_with_retry
+from broker import start_broker_with_retry
 
 from contracts import classify_input_topic
-from contracts import HOME_SCHEMA_NAME
 from contracts import parse_json_payload
 from contracts import validate_schema
 from contracts import VERIFIED_COMMAND_TOPIC_DEFAULT
@@ -86,7 +87,6 @@ async def process_verified_message(
 
 async def main() -> None:
     redis_url = os.getenv("REDIS_URL", "redis://redis:6379")
-    kafka_servers = os.getenv("KAFKA_SERVERS", "kafka:9092")
     verified_commands_topic = os.getenv(
         "VERIFIED_COMMAND_TOPIC",
         VERIFIED_COMMAND_TOPIC_DEFAULT,
@@ -101,13 +101,9 @@ async def main() -> None:
     ]
     state_ttl_sec = int(os.getenv("STATE_TTL_SEC", "7200"))
     r = redis.from_url(redis_url, decode_responses=True)
-    consumer = AIOKafkaConsumer(
-        *input_topics,
-        bootstrap_servers=kafka_servers,
-        group_id="SITL-controller-v1",
-    )
+    broker = create_broker_client_from_env()
+    await start_broker_with_retry(broker, log, "Controller broker")
 
-    await consumer.start()
     log.info(
         "Controller started. input_topics=%s redis=%s",
         input_topics,
@@ -115,8 +111,14 @@ async def main() -> None:
     )
 
     try:
-        async for msg in consumer:
-            payload = parse_json_payload(msg.value)
+        async for msg in iter_broker_messages_with_retry(
+            broker,
+            input_topics,
+            log,
+            "Controller broker",
+            group_id="SITL-controller-v1",
+        ):
+            payload = parse_json_payload(msg.payload)
             if payload is None:
                 log.warning("Rejected message from topic=%s: invalid JSON payload", msg.topic)
                 continue
@@ -130,7 +132,7 @@ async def main() -> None:
                 state_ttl_sec,
             )
     finally:
-        await consumer.stop()
+        await broker.stop()
         await r.aclose()
 
 

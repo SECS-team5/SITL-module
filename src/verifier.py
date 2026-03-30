@@ -1,11 +1,11 @@
 import asyncio
-import json
 import logging
 import os
 from typing import Any
 
-from aiokafka import AIOKafkaConsumer
-from aiokafka import AIOKafkaProducer
+from broker import create_broker_client_from_env
+from broker import iter_broker_messages_with_retry
+from broker import start_broker_with_retry
 
 from contracts import classify_input_topic
 from contracts import parse_json_payload
@@ -49,7 +49,6 @@ def process_input_message(
 
 
 async def main() -> None:
-    kafka_servers = os.getenv("KAFKA_SERVERS", "kafka:9092")
     commands_topic = os.getenv("COMMAND_TOPIC", "sitl.commands")
     home_topic = os.getenv("HOME_TOPIC", "sitl-drone-home")
     input_topics = parse_csv_env("INPUT_TOPICS", f"{commands_topic},{home_topic}")
@@ -65,18 +64,9 @@ async def main() -> None:
     if not input_topics:
         raise RuntimeError("INPUT_TOPICS cannot be empty")
 
-    producer = AIOKafkaProducer(
-        bootstrap_servers=kafka_servers,
-        value_serializer=lambda value: json.dumps(value).encode(),
-    )
-    consumer = AIOKafkaConsumer(
-        *input_topics,
-        bootstrap_servers=kafka_servers,
-        group_id="SITL-verifier-v1",
-    )
+    broker = create_broker_client_from_env()
 
-    await producer.start()
-    await consumer.start()
+    await start_broker_with_retry(broker, log, "Verifier broker")
     log.info(
         "Verifier started. input=%s verified_commands=%s verified_home=%s",
         input_topics,
@@ -85,10 +75,16 @@ async def main() -> None:
     )
 
     try:
-        async for msg in consumer:
+        async for msg in iter_broker_messages_with_retry(
+            broker,
+            input_topics,
+            log,
+            "Verifier broker",
+            group_id="SITL-verifier-v1",
+        ):
             ok, message_type, payload, reason = process_input_message(
                 msg.topic,
-                msg.value,
+                msg.payload,
                 commands_topic,
                 home_topic,
             )
@@ -101,7 +97,7 @@ async def main() -> None:
                 verified_commands_topic,
                 verified_home_topic,
             )
-            await producer.send_and_wait(output_topic, payload)
+            await broker.publish(output_topic, payload)
             log.info(
                 "Verified message_type=%s drone_id=%s output_topic=%s",
                 message_type,
@@ -109,8 +105,7 @@ async def main() -> None:
                 output_topic,
             )
     finally:
-        await producer.stop()
-        await consumer.stop()
+        await broker.stop()
 
 
 if __name__ == "__main__":
