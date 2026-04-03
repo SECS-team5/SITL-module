@@ -12,6 +12,9 @@ up-kafka:
 up-mqtt:
 	BROKER_BACKEND=mqtt COMPOSE_PROFILES=mqtt docker compose up -d --build
 
+up-app:
+	COMPOSE_PROFILES= docker compose up -d --build verifier controller core messaging
+
 down:
 	docker compose down
 
