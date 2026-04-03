@@ -4,10 +4,11 @@
 
 ### 1.1 System Context (Уровень 1)
 
-
+![Диаграмма архитектуры](SystemContext.svg)
 
 ### 1.2 Container Diagram (Уровень 2)
 
+![Диаграмма архитектуры](ContainerDiagram.svg)
 
 ## 2. Схемы данных (JSON Schema)
 
@@ -127,9 +128,11 @@
 
 ### 5.1 Полный цикл команды управления
 
+![Диаграмма архитектуры](LoopCommands.svg)
 
 ### 5.2 Запрос телеметрии (Request-Response)
 
+![Диаграмма архитектуры](Telemetryrequest.svg)
 
 ## Топики брокера сообщений
 
