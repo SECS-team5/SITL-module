@@ -1,4 +1,3 @@
-import logging
 import os
 from abc import ABC
 from abc import abstractmethod
@@ -23,11 +22,11 @@ from contracts import POSITION_REQUEST_TOPIC_DEFAULT
 from contracts import POSITION_RESPONSE_TOPIC_DEFAULT
 from contracts import POSITION_RESPONSE_SCHEMA_NAME
 from contracts import validate_schema
+from infopanel_client import create_infopanel_client_from_env
 from state import build_position_response
 from state import normalize_state
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger(__name__)
+infopanel = create_infopanel_client_from_env()
 
 RequestHandler = Callable[[dict[str, Any]], Awaitable[Optional[dict[str, Any]]]]
 
@@ -73,7 +72,7 @@ async def handle_position_request(
 ) -> dict[str, float] | None:
     response, reason = await resolve_position_request(r, payload)
     if response is None:
-        log.warning("Rejected position request: %s", reason)
+        infopanel.log_event(f"Rejected position request: {reason}", "warning")
         return None
     return response
 
@@ -130,18 +129,17 @@ class BrokerRequestResponder(RequestResponder):
         handler: RequestHandler,
         default_response_topic: str,
     ) -> None:
-        await start_broker_with_retry(self.broker, log, "Messaging broker")
-        log.info(
-            "Request responder started. request_topic=%s response_topic=%s",
-            topic,
-            default_response_topic,
+        await start_broker_with_retry(self.broker, infopanel, "Messaging broker")
+        infopanel.log_event(
+            f"Request responder started. request_topic={topic} response_topic={default_response_topic}",
+            "info"
         )
 
         try:
             async for msg in iter_broker_messages_with_retry(
                 self.broker,
                 [topic],
-                log,
+                infopanel,
                 "Messaging broker",
                 group_id=self.consumer_group_id,
             ):
@@ -154,16 +152,21 @@ class BrokerRequestResponder(RequestResponder):
                         default_response_topic,
                     )
                     if not ok:
-                        log.warning("Rejected request from topic=%s: %s", msg.topic, detail)
+                        infopanel.log_event(
+                            f"Rejected request from topic={msg.topic}: {detail}",
+                            "warning"
+                        )
                         continue
 
-                    log.info(
-                        "Returned position for drone_id=%s reply_to=%s",
-                        drone_id,
-                        detail,
+                    infopanel.log_event(
+                        f"Returned position for drone_id={drone_id} reply_to={detail}",
+                        "info"
                     )
                 except Exception as exc:
-                    log.error("Failed to process request from topic=%s: %s", msg.topic, exc, exc_info=True)
+                    infopanel.log_event(
+                        f"Failed to process request from topic={msg.topic}: {exc}",
+                        "error"
+                    )
         finally:
             await self.broker.stop()
 
@@ -176,10 +179,10 @@ async def main() -> None:
     broker = create_broker_client_from_env()
     responder = BrokerRequestResponder(broker)
 
-    log.info(
-        "Messaging started. redis=%s request_topic=%s",
-        redis_url,
-        request_topic,
+    await infopanel.start()
+    infopanel.log_event(
+        f"Messaging started. redis={redis_url} request_topic={request_topic}",
+        "info"
     )
 
     async def position_request_handler(payload: dict[str, Any]) -> dict[str, float] | None:
@@ -189,6 +192,7 @@ async def main() -> None:
         await responder.serve(request_topic, position_request_handler, response_topic)
     finally:
         await r.aclose()
+        await infopanel.stop()
 
 
 if __name__ == "__main__":

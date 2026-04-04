@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import os
 from typing import Any
 
@@ -13,9 +12,9 @@ from contracts import resolve_verified_topic
 from contracts import validate_schema
 from contracts import VERIFIED_COMMAND_TOPIC_DEFAULT
 from contracts import VERIFIED_HOME_TOPIC_DEFAULT
+from infopanel_client import create_infopanel_client_from_env
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger(__name__)
+infopanel = create_infopanel_client_from_env()
 
 
 def parse_csv_env(name: str, default: str = "") -> list[str]:
@@ -24,10 +23,10 @@ def parse_csv_env(name: str, default: str = "") -> list[str]:
 
 
 def process_input_message(
-    topic: str,
-    raw_payload: Any,
-    commands_topic: str,
-    home_topic: str,
+        topic: str,
+        raw_payload: Any,
+        commands_topic: str,
+        home_topic: str,
 ) -> tuple[bool, str | None, dict[str, Any] | None, str]:
     payload = parse_json_payload(raw_payload)
     if payload is None:
@@ -66,21 +65,22 @@ async def main() -> None:
 
     broker = create_broker_client_from_env()
 
-    await start_broker_with_retry(broker, log, "Verifier broker")
-    log.info(
-        "Verifier started. input=%s verified_commands=%s verified_home=%s",
-        input_topics,
-        verified_commands_topic,
-        verified_home_topic,
+    await infopanel.start()
+    await start_broker_with_retry(broker, infopanel, "Verifier broker")
+
+    infopanel.log_event(
+        f"Verifier started. input={input_topics} "
+        f"verified_commands={verified_commands_topic} verified_home={verified_home_topic}",
+        "info"
     )
 
     try:
         async for msg in iter_broker_messages_with_retry(
-            broker,
-            input_topics,
-            log,
-            "Verifier broker",
-            group_id="SITL-verifier-v1",
+                broker,
+                input_topics,
+                infopanel,
+                "Verifier broker",
+                group_id="SITL-verifier-v1",
         ):
             ok, message_type, payload, reason = process_input_message(
                 msg.topic,
@@ -89,7 +89,10 @@ async def main() -> None:
                 home_topic,
             )
             if not ok or message_type is None or payload is None:
-                log.warning("Rejected message from topic=%s: %s", msg.topic, reason)
+                infopanel.log_event(
+                    f"Rejected message from topic={msg.topic}: {reason}",
+                    "warning"
+                )
                 continue
 
             output_topic = resolve_verified_topic(
@@ -98,14 +101,14 @@ async def main() -> None:
                 verified_home_topic,
             )
             await broker.publish(output_topic, payload)
-            log.info(
-                "Verified message_type=%s drone_id=%s output_topic=%s",
-                message_type,
-                payload["drone_id"],
-                output_topic,
+            infopanel.log_event(
+                f"Verified message_type={message_type} drone_id={payload['drone_id']} "
+                f"output_topic={output_topic}",
+                "info"
             )
     finally:
         await broker.stop()
+        await infopanel.stop()
 
 
 if __name__ == "__main__":
