@@ -70,6 +70,9 @@ services:
       dockerfile: Dockerfile
     container_name: sitl-verifier
     command: ["python", "-u", "src/verifier.py"]
+    volumes:
+      - .:/app
+    working_dir: /app
     environment:
       BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
       KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}

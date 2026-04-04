@@ -18,8 +18,14 @@ down:
 logs:
 	docker compose logs -f
 
-test:
-	BROKER_BACKEND=$(BROKER_BACKEND) COMPOSE_PROFILES=$(COMPOSE_PROFILES) docker compose run --rm --no-deps verifier pytest -q tests
+test-unit:
+	docker compose run --rm --no-deps verifier pytest -q tests/unit/
+
+test-integration:
+	BROKER_BACKEND=$(BROKER_BACKEND) COMPOSE_PROFILES=$(BROKER_BACKEND) \
+	docker compose up -d --wait
+	docker compose run --rm verifier pytest -q tests/integration/test_messaging_integration.py
+	docker compose down
 
 clean:
 	docker compose down --volumes --remove-orphans
