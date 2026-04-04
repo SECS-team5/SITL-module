@@ -1,6 +1,5 @@
 import asyncio
 import json
-import logging
 import os
 from abc import ABC
 from abc import abstractmethod
@@ -10,10 +9,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 from typing import Callable
+from typing import TYPE_CHECKING
 
 import aiomqtt
 from aiokafka import AIOKafkaConsumer
 from aiokafka import AIOKafkaProducer
+
+if TYPE_CHECKING:
+    from infopanel_client import InfopanelClient
 
 DEFAULT_BROKER_BACKEND = "kafka"
 DEFAULT_KAFKA_SERVERS = "kafka:9092"
@@ -285,7 +288,7 @@ def _next_retry_delay(current_delay: float) -> float:
 
 async def start_broker_with_retry(
     client: BrokerClient,
-    log: logging.Logger,
+    infopanel: "InfopanelClient",
     label: str,
 ) -> None:
     delay = RETRY_DELAYS_SEC[0]
@@ -294,7 +297,10 @@ async def start_broker_with_retry(
             await client.start()
             return
         except Exception as exc:
-            log.warning("%s unavailable: %s. Retrying in %.0fs", label, exc, delay)
+            infopanel.log_event(
+                f"{label} unavailable: {exc}. Retrying in {delay:.0f}s",
+                "warning"
+            )
             await asyncio.sleep(delay)
             delay = _next_retry_delay(delay)
 
@@ -302,7 +308,7 @@ async def start_broker_with_retry(
 async def iter_broker_messages_with_retry(
     client: BrokerClient,
     topics: Sequence[str],
-    log: logging.Logger,
+    infopanel: "InfopanelClient",
     label: str,
     group_id: str | None = None,
 ) -> AsyncIterator[BrokerMessage]:
@@ -314,6 +320,9 @@ async def iter_broker_messages_with_retry(
                 yield message
             return
         except Exception as exc:
-            log.warning("%s subscription unavailable: %s. Retrying in %.0fs", label, exc, delay)
+            infopanel.log_event(
+                f"{label} subscription unavailable: {exc}. Retrying in {delay:.0f}s",
+                "warning"
+            )
             await asyncio.sleep(delay)
             delay = _next_retry_delay(delay)
