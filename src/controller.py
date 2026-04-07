@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import os
 from typing import Any
 
@@ -13,6 +12,7 @@ from contracts import parse_json_payload
 from contracts import validate_schema
 from contracts import VERIFIED_COMMAND_TOPIC_DEFAULT
 from contracts import VERIFIED_HOME_TOPIC_DEFAULT
+from infopanel_client import create_infopanel_client_from_env
 from state import apply_command_update
 from state import build_home_state
 from state import get_drone_state_key
@@ -20,8 +20,7 @@ from state import normalize_state
 from state import serialize_state
 from state import state_has_home
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger(__name__)
+infopanel = create_infopanel_client_from_env()
 
 
 async def persist_state(
@@ -50,12 +49,18 @@ async def process_verified_message(
         verified_home_topic,
     )
     if not ok:
-        log.warning("Rejected verified message from topic=%s: %s", topic, schema_name)
+        infopanel.log_event(
+            f"Rejected verified message from topic={topic}: {schema_name}",
+            "warning"
+        )
         return False
 
     ok, reason = validate_schema(payload, schema_name)
     if not ok:
-        log.warning("Rejected verified message from topic=%s: %s", topic, reason)
+        infopanel.log_event(
+            f"Rejected verified message from topic={topic}: {reason}",
+            "warning"
+        )
         return False
 
     drone_id = payload["drone_id"]
@@ -65,22 +70,25 @@ async def process_verified_message(
     if message_type == "HOME":
         next_state = build_home_state(payload, existing_state or None)
         await persist_state(r, drone_id, next_state, state_ttl_sec)
-        log.info("Stored HOME for drone_id=%s status=%s", drone_id, next_state["status"])
+        infopanel.log_event(
+            f"Stored HOME for drone_id={drone_id} status={next_state['status']}",
+            "info"
+        )
         return True
 
     if not existing_state or not state_has_home(existing_state):
-        log.warning("Ignored COMMAND for drone_id=%s: HOME state is missing", drone_id)
+        infopanel.log_event(
+            f"Ignored COMMAND for drone_id={drone_id}: HOME state is missing",
+            "warning"
+        )
         return False
 
     next_state = apply_command_update(existing_state, payload)
     await persist_state(r, drone_id, next_state, state_ttl_sec)
-    log.info(
-        "Applied COMMAND for drone_id=%s status=%s vx=%s vy=%s vz=%s",
-        drone_id,
-        next_state["status"],
-        next_state["vx"],
-        next_state["vy"],
-        next_state["vz"],
+    infopanel.log_event(
+        f"Applied COMMAND for drone_id={drone_id} status={next_state['status']} "
+        f"vx={next_state['vx']} vy={next_state['vy']} vz={next_state['vz']}",
+        "info"
     )
     return True
 
@@ -102,25 +110,29 @@ async def main() -> None:
     state_ttl_sec = int(os.getenv("STATE_TTL_SEC", "7200"))
     r = redis.from_url(redis_url, decode_responses=True)
     broker = create_broker_client_from_env()
-    await start_broker_with_retry(broker, log, "Controller broker")
 
-    log.info(
-        "Controller started. input_topics=%s redis=%s",
-        input_topics,
-        redis_url,
+    await infopanel.start()
+    await start_broker_with_retry(broker, infopanel, "Controller broker")
+
+    infopanel.log_event(
+        f"Controller started. input_topics={input_topics} redis={redis_url}",
+        "info"
     )
 
     try:
         async for msg in iter_broker_messages_with_retry(
             broker,
             input_topics,
-            log,
+            infopanel,
             "Controller broker",
             group_id="SITL-controller-v1",
         ):
             payload = parse_json_payload(msg.payload)
             if payload is None:
-                log.warning("Rejected message from topic=%s: invalid JSON payload", msg.topic)
+                infopanel.log_event(
+                    f"Rejected message from topic={msg.topic}: invalid JSON payload",
+                    "warning"
+                )
                 continue
 
             await process_verified_message(
@@ -134,6 +146,7 @@ async def main() -> None:
     finally:
         await broker.stop()
         await r.aclose()
+        await infopanel.stop()
 
 
 if __name__ == "__main__":

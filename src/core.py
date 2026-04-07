@@ -1,15 +1,15 @@
 import asyncio
-import logging
 import os
 
 import redis.asyncio as redis
 
+from infopanel_client import create_infopanel_client_from_env
 from state import advance_drone_state
 from state import normalize_state
 from state import serialize_state
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger(__name__)
+# Глобальный клиент инфопанели
+infopanel = create_infopanel_client_from_env()
 
 
 async def refresh_state_ttl(
@@ -47,7 +47,7 @@ async def position_updater_task(
     state_ttl_sec: int,
 ) -> None:
     update_interval_sec = 1.0 / update_hz
-    log.info("Position updater started at %.1f Hz", update_hz)
+    infopanel.log_event(f"Position updater started at {update_hz:.1f} Hz", "info")
 
     while True:
         try:
@@ -55,7 +55,7 @@ async def position_updater_task(
                 await update_drone_position(r, state_key, update_interval_sec, state_ttl_sec)
             await asyncio.sleep(update_interval_sec)
         except Exception as exc:
-            log.error("Position updater failed: %s", exc, exc_info=True)
+            infopanel.log_event(f"Position updater failed: {exc}", "error")
             await asyncio.sleep(update_interval_sec)
 
 
@@ -65,16 +65,17 @@ async def main() -> None:
     state_ttl_sec = int(os.getenv("STATE_TTL_SEC", "7200"))
     r = redis.from_url(redis_url, decode_responses=True)
 
-    log.info(
-        "Core started. redis=%s update_hz=%.1f",
-        redis_url,
-        update_hz,
+    await infopanel.start()
+    infopanel.log_event(
+        f"Core started. redis={redis_url} update_hz={update_hz:.1f}",
+        "info"
     )
 
     try:
         await position_updater_task(r, update_hz, state_ttl_sec)
     finally:
         await r.aclose()
+        await infopanel.stop()
 
 
 if __name__ == "__main__":

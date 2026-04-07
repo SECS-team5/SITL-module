@@ -86,6 +86,10 @@ services:
       HOME_TOPIC: ${HOME_TOPIC:-sitl-drone-home}
       VERIFIED_COMMAND_TOPIC: ${VERIFIED_COMMAND_TOPIC:-sitl.verified-commands}
       VERIFIED_HOME_TOPIC: ${VERIFIED_HOME_TOPIC:-sitl.verified-home}
+      INFOPANEL_URL: ${INFOPANEL_URL:-https://infopanel.csse.ru/api}
+      INFOPANEL_API_KEY: ${INFOPANEL_API_KEY}
+      INFOPANEL_SERVICE: ${INFOPANEL_SERVICE:-SITL}
+      INFOPANEL_SERVICE_ID: ${INFOPANEL_SERVICE_ID:-5}
     restart: unless-stopped
 
   controller:
@@ -109,6 +113,10 @@ services:
       VERIFIED_COMMAND_TOPIC: ${VERIFIED_COMMAND_TOPIC:-sitl.verified-commands}
       VERIFIED_HOME_TOPIC: ${VERIFIED_HOME_TOPIC:-sitl.verified-home}
       STATE_TTL_SEC: ${STATE_TTL_SEC:-7200}
+      INFOPANEL_URL: ${INFOPANEL_URL:-https://infopanel.csse.ru/api}
+      INFOPANEL_API_KEY: ${INFOPANEL_API_KEY}
+      INFOPANEL_SERVICE: ${INFOPANEL_SERVICE:-SITL}
+      INFOPANEL_SERVICE_ID: ${INFOPANEL_SERVICE_ID:-5}
     restart: unless-stopped
 
   core:
@@ -124,6 +132,10 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       UPDATE_FREQUENCY_HZ: ${UPDATE_FREQUENCY_HZ:-10.0}
       STATE_TTL_SEC: ${STATE_TTL_SEC:-7200}
+      INFOPANEL_URL: ${INFOPANEL_URL:-https://infopanel.csse.ru/api}
+      INFOPANEL_API_KEY: ${INFOPANEL_API_KEY}
+      INFOPANEL_SERVICE: ${INFOPANEL_SERVICE:-SITL}
+      INFOPANEL_SERVICE_ID: ${INFOPANEL_SERVICE_ID:-5}
     restart: unless-stopped
 
   messaging:
@@ -146,6 +158,10 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       POSITION_REQUEST_TOPIC: ${POSITION_REQUEST_TOPIC:-sitl.telemetry.request}
       POSITION_RESPONSE_TOPIC: ${POSITION_RESPONSE_TOPIC:-sitl.telemetry.response}
+      INFOPANEL_URL: ${INFOPANEL_URL:-https://infopanel.csse.ru/api}
+      INFOPANEL_API_KEY: ${INFOPANEL_API_KEY}
+      INFOPANEL_SERVICE: ${INFOPANEL_SERVICE:-SITL}
+      INFOPANEL_SERVICE_ID: ${INFOPANEL_SERVICE_ID:-5}
     restart: unless-stopped
 
 volumes:
