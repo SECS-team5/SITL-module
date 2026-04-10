@@ -64,12 +64,11 @@ services:
       timeout: 5s
       retries: 5
 
-  verifier:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  sitl_verifier:
+    image: sitl-module-verifier:latest
     container_name: sitl-verifier
-    command: ["python", "-u", "src/verifier.py"]
+    entrypoint: [""]
+    command: ["sh", "-c", "pip install -q kafka-python aiohttp && python -u -m components.sitl_verifier"]
     volumes:
       - .:/app
     working_dir: /app
@@ -86,21 +85,24 @@ services:
       HOME_TOPIC: ${HOME_TOPIC:-sitl-drone-home}
       VERIFIED_COMMAND_TOPIC: ${VERIFIED_COMMAND_TOPIC:-sitl.verified-commands}
       VERIFIED_HOME_TOPIC: ${VERIFIED_HOME_TOPIC:-sitl.verified-home}
+      COMPONENT_ID: sitl-verifier
       INFOPANEL_URL: ${INFOPANEL_URL:-https://infopanel.csse.ru/api}
-      INFOPANEL_API_KEY: ${INFOPANEL_API_KEY}
+      INFOPANEL_API_KEY: ${INFOPANEL_API_KEY:-your-api-key-here}
       INFOPANEL_SERVICE: ${INFOPANEL_SERVICE:-SITL}
       INFOPANEL_SERVICE_ID: ${INFOPANEL_SERVICE_ID:-5}
     restart: unless-stopped
 
-  controller:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  sitl_controller:
+    image: sitl-module-controller:latest
     container_name: sitl-controller
-    command: ["python", "-u", "src/controller.py"]
+    entrypoint: [""]
+    command: ["sh", "-c", "pip install -q kafka-python aiohttp && python -u -m components.sitl_controller"]
     depends_on:
       redis:
         condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
     environment:
       BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
       KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
@@ -113,40 +115,46 @@ services:
       VERIFIED_COMMAND_TOPIC: ${VERIFIED_COMMAND_TOPIC:-sitl.verified-commands}
       VERIFIED_HOME_TOPIC: ${VERIFIED_HOME_TOPIC:-sitl.verified-home}
       STATE_TTL_SEC: ${STATE_TTL_SEC:-7200}
+      COMPONENT_ID: sitl-controller
       INFOPANEL_URL: ${INFOPANEL_URL:-https://infopanel.csse.ru/api}
-      INFOPANEL_API_KEY: ${INFOPANEL_API_KEY}
+      INFOPANEL_API_KEY: ${INFOPANEL_API_KEY:-your-api-key-here}
       INFOPANEL_SERVICE: ${INFOPANEL_SERVICE:-SITL}
       INFOPANEL_SERVICE_ID: ${INFOPANEL_SERVICE_ID:-5}
     restart: unless-stopped
 
-  core:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  sitl_core:
+    image: sitl-module-core:latest
     container_name: sitl-core
-    command: ["python", "-u", "src/core.py"]
+    entrypoint: [""]
+    command: ["sh", "-c", "pip install -q kafka-python aiohttp && python -u -m components.sitl_core"]
     depends_on:
       redis:
         condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
     environment:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       UPDATE_FREQUENCY_HZ: ${UPDATE_FREQUENCY_HZ:-10.0}
       STATE_TTL_SEC: ${STATE_TTL_SEC:-7200}
+      COMPONENT_ID: sitl-core
       INFOPANEL_URL: ${INFOPANEL_URL:-https://infopanel.csse.ru/api}
-      INFOPANEL_API_KEY: ${INFOPANEL_API_KEY}
+      INFOPANEL_API_KEY: ${INFOPANEL_API_KEY:-your-api-key-here}
       INFOPANEL_SERVICE: ${INFOPANEL_SERVICE:-SITL}
       INFOPANEL_SERVICE_ID: ${INFOPANEL_SERVICE_ID:-5}
     restart: unless-stopped
 
-  messaging:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  sitl_messaging:
+    image: sitl-module-messaging:latest
     container_name: sitl-messaging
-    command: ["python", "-u", "src/messaging.py"]
+    entrypoint: [""]
+    command: ["sh", "-c", "pip install -q kafka-python aiohttp && python -u -m components.sitl_messaging"]
     depends_on:
       redis:
         condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
     environment:
       BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
       KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
@@ -158,8 +166,9 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       POSITION_REQUEST_TOPIC: ${POSITION_REQUEST_TOPIC:-sitl.telemetry.request}
       POSITION_RESPONSE_TOPIC: ${POSITION_RESPONSE_TOPIC:-sitl.telemetry.response}
+      COMPONENT_ID: sitl-messaging
       INFOPANEL_URL: ${INFOPANEL_URL:-https://infopanel.csse.ru/api}
-      INFOPANEL_API_KEY: ${INFOPANEL_API_KEY}
+      INFOPANEL_API_KEY: ${INFOPANEL_API_KEY:-your-api-key-here}
       INFOPANEL_SERVICE: ${INFOPANEL_SERVICE:-SITL}
       INFOPANEL_SERVICE_ID: ${INFOPANEL_SERVICE_ID:-5}
     restart: unless-stopped

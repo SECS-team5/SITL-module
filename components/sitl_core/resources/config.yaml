@@ -1,0 +1,5 @@
+# Конфигурация SITL Core
+
+redis_url: "redis://redis:6379"
+update_frequency_hz: 10.0
+state_ttl_sec: 7200

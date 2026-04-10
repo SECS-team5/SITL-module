@@ -1,0 +1,6 @@
+# Конфигурация SITL Verifier
+
+commands_topic: "sitl.commands"
+home_topic: "sitl-drone-home"
+verified_commands_topic: "sitl.verified-commands"
+verified_home_topic: "sitl.verified-home"

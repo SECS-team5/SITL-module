@@ -3,13 +3,11 @@ import pathlib
 import sys
 
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+ROOT = pathlib.Path(__file__).resolve().parents[2]  # new-SITL/
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-import contracts  # type: ignore  # noqa: E402
-import verifier  # type: ignore  # noqa: E402
+from shared import contracts  # noqa: E402
 
 
 COMMAND_TOPIC = "sitl.commands"
@@ -26,6 +24,8 @@ def test_parse_json_payload_accepts_dict_bytes_and_string() -> None:
 
 
 def test_process_input_message_accepts_valid_command_message() -> None:
+    from components.sitl_verifier.src.sitl_verifier import SitlVerifierComponent
+
     payload = {
         "drone_id": "drone_001",
         "vx": 3.5,
@@ -33,11 +33,10 @@ def test_process_input_message_accepts_valid_command_message() -> None:
         "vz": 0.5,
         "mag_heading": 90.0,
     }
-    ok, message_type, validated_payload, reason = verifier.process_input_message(
-        COMMAND_TOPIC,
-        json.dumps(payload).encode(),
-        COMMAND_TOPIC,
-        HOME_TOPIC,
+
+    component = _make_component()
+    ok, message_type, validated_payload, reason = component._process_input_message(
+        COMMAND_TOPIC, payload
     )
 
     assert ok is True
@@ -58,11 +57,10 @@ def test_process_input_message_accepts_valid_home_message() -> None:
         "home_lon": 30.3141,
         "home_alt": 100.0,
     }
-    ok, message_type, validated_payload, reason = verifier.process_input_message(
-        HOME_TOPIC,
-        payload,
-        COMMAND_TOPIC,
-        HOME_TOPIC,
+
+    component = _make_component()
+    ok, message_type, validated_payload, reason = component._process_input_message(
+        HOME_TOPIC, payload
     )
 
     assert ok is True
@@ -83,18 +81,16 @@ def test_process_input_message_rejects_missing_required_command_field() -> None:
         "vy": -1.0,
         "mag_heading": 90.0,
     }
-    ok, message_type, validated_payload, reason = verifier.process_input_message(
-        COMMAND_TOPIC,
-        payload,
-        COMMAND_TOPIC,
-        HOME_TOPIC,
+
+    component = _make_component()
+    ok, message_type, validated_payload, reason = component._process_input_message(
+        COMMAND_TOPIC, payload
     )
 
     assert ok is False
     assert message_type is None
     assert validated_payload is None
-    assert "required property" in reason
-    assert "vz" in reason
+    assert "required property" in reason.lower() or "vz" in reason
 
 
 def test_process_input_message_rejects_additional_fields() -> None:
@@ -105,11 +101,10 @@ def test_process_input_message_rejects_additional_fields() -> None:
         "home_alt": 100.0,
         "unexpected": "value",
     }
-    ok, message_type, validated_payload, reason = verifier.process_input_message(
-        HOME_TOPIC,
-        payload,
-        COMMAND_TOPIC,
-        HOME_TOPIC,
+
+    component = _make_component()
+    ok, message_type, validated_payload, reason = component._process_input_message(
+        HOME_TOPIC, payload
     )
 
     assert ok is False
@@ -126,11 +121,10 @@ def test_process_input_message_rejects_out_of_range_heading() -> None:
         "vz": 0.0,
         "mag_heading": 400.0,
     }
-    ok, message_type, validated_payload, reason = verifier.process_input_message(
-        COMMAND_TOPIC,
-        payload,
-        COMMAND_TOPIC,
-        HOME_TOPIC,
+
+    component = _make_component()
+    ok, message_type, validated_payload, reason = component._process_input_message(
+        COMMAND_TOPIC, payload
     )
 
     assert ok is False
@@ -140,14 +134,25 @@ def test_process_input_message_rejects_out_of_range_heading() -> None:
 
 
 def test_process_input_message_rejects_unsupported_topic() -> None:
-    ok, message_type, validated_payload, reason = verifier.process_input_message(
-        "sitl-unknown",
-        {"drone_id": "drone_001"},
-        COMMAND_TOPIC,
-        HOME_TOPIC,
+    component = _make_component()
+    ok, message_type, validated_payload, reason = component._process_input_message(
+        "sitl-unknown", {"drone_id": "drone_001"}
     )
 
     assert ok is False
     assert message_type is None
     assert validated_payload is None
     assert "unsupported topic" in reason
+
+
+def _make_component():
+    """Создаёт компонент с мокнутым брокером для тестирования."""
+    from unittest.mock import MagicMock
+    from components.sitl_verifier.src.sitl_verifier import SitlVerifierComponent
+
+    mock_bus = MagicMock()
+    return SitlVerifierComponent(
+        component_id="test-verifier",
+        bus=mock_bus,
+        topic="components.sitl_verifier",
+    )

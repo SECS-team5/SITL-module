@@ -1,19 +1,31 @@
-.PHONY: up up-kafka up-mqtt down logs test clean
+include .env
+export BROKER_BACKEND
 
-BROKER_BACKEND ?= kafka
-COMPOSE_PROFILES ?= $(BROKER_BACKEND)
+.PHONY: up up-kafka up-mqtt down logs unit-test integration-test clean
 
 up:
-	BROKER_BACKEND=$(BROKER_BACKEND) COMPOSE_PROFILES=$(COMPOSE_PROFILES) docker compose up -d --build
+ifeq ($(BROKER_BACKEND),kafka)
+	@echo "Starting with Kafka..."
+	docker compose --profile kafka up -d --build
+else ifeq ($(BROKER_BACKEND),mqtt)
+	@echo "Starting with MQTT..."
+	docker compose --profile mqtt up -d --build
+else
+	@echo "Error: BROKER_BACKEND must be 'kafka' or 'mqtt' (got '$(BROKER_BACKEND)')"
+	@exit 1
+endif
 
 up-kafka:
-	BROKER_BACKEND=kafka COMPOSE_PROFILES=kafka docker compose up -d --build
+	@echo "Starting with Kafka..."
+	docker compose --profile kafka up -d --build
 
 up-mqtt:
-	BROKER_BACKEND=mqtt COMPOSE_PROFILES=mqtt docker compose up -d --build
+	@echo "Starting with MQTT..."
+	docker compose --profile mqtt up -d --build
 
 up-app:
-	COMPOSE_PROFILES= docker compose up -d --build verifier controller core messaging
+	@echo "Starting only app components..."
+	docker compose up -d --build sitl_verifier sitl_controller sitl_core sitl_messaging
 
 down:
 	docker compose down
@@ -21,14 +33,15 @@ down:
 logs:
 	docker compose logs -f
 
-test-unit:
-	docker compose run --rm --no-deps verifier pytest -q tests/unit/
+unit-test:
+	@echo "=== Running unit tests ==="
+	docker compose run --rm --no-deps --entrypoint "" sitl_verifier sh -c "pip install -q kafka-python aiohttp pytest pytest-asyncio && python -m pytest tests/unit/ -v"
 
-test-integration:
-	BROKER_BACKEND=$(BROKER_BACKEND) COMPOSE_PROFILES=$(BROKER_BACKEND) \
-	docker compose up -d --wait
-	docker compose run --rm verifier pytest -q tests/integration/test_messaging_integration.py
-	docker compose down
+integration-test:
+	@echo "=== Running integration tests ==="
+	docker compose run --rm --no-deps --entrypoint "" sitl_verifier sh -c "pip install -q kafka-python aiohttp && python tests/integration/test_full_lifecycle.py"
+	docker compose run --rm --no-deps --entrypoint "" sitl_controller sh -c "pip install -q kafka-python aiohttp && python tests/integration/test_home_position_integration.py"
+	docker compose run --rm --no-deps --entrypoint "" sitl_messaging sh -c "pip install -q kafka-python aiohttp && python tests/integration/test_messaging_integration.py"
 
 clean:
 	docker compose down --volumes --remove-orphans

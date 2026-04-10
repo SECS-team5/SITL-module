@@ -1,0 +1,6 @@
+# Конфигурация SITL Controller
+
+redis_url: "redis://redis:6379"
+verified_commands_topic: "sitl.verified-commands"
+verified_home_topic: "sitl.verified-home"
+state_ttl_sec: 7200

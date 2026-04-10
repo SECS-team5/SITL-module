@@ -1,0 +1,5 @@
+# Конфигурация SITL Messaging
+
+redis_url: "redis://redis:6379"
+request_topic: "sitl.telemetry.request"
+response_topic: "sitl.telemetry.response"
