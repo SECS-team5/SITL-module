@@ -1,30 +1,7 @@
-include .env
-export BROKER_BACKEND
-
-.PHONY: up up-kafka up-mqtt down logs unit-test integration-test clean
+.PHONY: up down logs unit-test integration-test clean
 
 up:
-ifeq ($(BROKER_BACKEND),kafka)
-	@echo "Starting with Kafka..."
-	docker compose --profile kafka up -d --build
-else ifeq ($(BROKER_BACKEND),mqtt)
-	@echo "Starting with MQTT..."
-	docker compose --profile mqtt up -d --build
-else
-	@echo "Error: BROKER_BACKEND must be 'kafka' or 'mqtt' (got '$(BROKER_BACKEND)')"
-	@exit 1
-endif
-
-up-kafka:
-	@echo "Starting with Kafka..."
-	docker compose --profile kafka up -d --build
-
-up-mqtt:
-	@echo "Starting with MQTT..."
-	docker compose --profile mqtt up -d --build
-
-up-app:
-	@echo "Starting only app components..."
+	@echo "Starting application components..."
 	docker compose up -d --build sitl_verifier sitl_controller sitl_core sitl_messaging
 
 down:
