@@ -82,6 +82,7 @@ class MQTTSystemBus(SystemBus):
         try:
             topic = self._mqtt_to_topic(msg.topic)
             message = json.loads(msg.payload.decode('utf-8'))
+            print(f"[MQTTBus] Received on '{topic}': {message}")
             correlation_id = message.get("correlation_id")
             if correlation_id:
                 with self._pending_lock:

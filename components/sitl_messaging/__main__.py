@@ -18,6 +18,7 @@ def main():
     from broker.src.system_bus import SystemBus
     from broker.src.bus_factory import create_system_bus
     from components.sitl_messaging.src.sitl_messaging import SitlMessagingComponent
+    from shared.contracts import POSITION_REQUEST_TOPIC_DEFAULT
 
     # Маппинг переменных окружения
     backend = os.environ.get("BROKER_BACKEND", "kafka").lower()
@@ -37,11 +38,12 @@ def main():
     component = SitlMessagingComponent(
         component_id=component_id,
         bus=bus,
-        topic="components.sitl_messaging",
+        topic=os.getenv("POSITION_REQUEST_TOPIC", POSITION_REQUEST_TOPIC_DEFAULT),
     )
 
     # Запускаем infopanel
     loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
     def shutdown(sig, frame):
         print(f"[{component_id}] Shutting down...")

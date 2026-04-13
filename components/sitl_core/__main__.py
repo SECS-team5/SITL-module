@@ -41,6 +41,7 @@ def main():
     )
 
     loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
     def shutdown(sig, frame):
         print(f"[{component_id}] Shutting down...")
@@ -53,7 +54,8 @@ def main():
     async def run_all():
         """Запуск брокера, infopanel и фоновой задачи обновления."""
         component.bus.start()
-        component.bus.subscribe(component.topic, lambda msg: asyncio.ensure_future(component._handle_message(msg)))
+        loop = asyncio.get_event_loop()
+        component.bus.subscribe(component.topic, lambda msg: asyncio.run_coroutine_threadsafe(component._handle_message(msg), loop))
         component._running = True
         print(f"[{component_id}] Started. Listening on topic: {component.topic}")
 

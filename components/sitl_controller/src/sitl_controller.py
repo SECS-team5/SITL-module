@@ -3,6 +3,7 @@ SITL Controller — компонент обработки верифициров
 
 Адаптирован из SITL-module/controller.py для работы через BaseAsyncComponent.
 """
+import asyncio
 import os
 from typing import Dict, Any, Optional
 
@@ -62,6 +63,31 @@ class SitlControllerComponent(BaseAsyncComponent):
 
     def _register_handlers(self):
         self.register_handler("verified_message", self._handle_verified_message)
+
+    def start(self):
+        """Подписывается на verified-топики + свой компонентный топик."""
+        self._loop = asyncio.get_event_loop()
+        # Подписка на верифицированные топики (от Verifier)
+        def _on_verified_commands(msg):
+            fut = asyncio.run_coroutine_threadsafe(self._handle_verified_message(msg), self._loop)
+            fut.add_done_callback(lambda f: self._log_callback_error(f, "commands"))
+        def _on_verified_home(msg):
+            fut = asyncio.run_coroutine_threadsafe(self._handle_verified_message(msg), self._loop)
+            fut.add_done_callback(lambda f: self._log_callback_error(f, "home"))
+        self.bus.subscribe(self._verified_commands_topic, _on_verified_commands)
+        self.bus.subscribe(self._verified_home_topic, _on_verified_home)
+        print(f"[{self.component_id}] Subscribed to verified topics: {self._verified_commands_topic}, {self._verified_home_topic}")
+        # Подписка на компонентный топик (для тестов и прямых вызовов)
+        super().start()
+
+    def _log_callback_error(self, future, topic_name):
+        try:
+            result = future.result()
+            print(f"[{self.component_id}] {topic_name} handled: {result}")
+        except Exception as e:
+            import traceback
+            print(f"[{self.component_id}] Error in {topic_name} handler: {e}")
+            traceback.print_exc()
 
     async def _handle_verified_message(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Обработка верифицированного сообщения."""

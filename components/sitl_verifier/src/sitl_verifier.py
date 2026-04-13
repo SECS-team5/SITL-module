@@ -62,6 +62,34 @@ class SitlVerifierComponent(BaseAsyncComponent):
         self.register_handler("raw_command", self._handle_raw_command)
         self.register_handler("raw_home", self._handle_raw_home)
 
+    def start(self):
+        """Подписывается на сырые input-топики + свой компонентный топик."""
+        self._loop = asyncio.get_event_loop()
+        # Подписка на сырые топики (от клиентов/тестов)
+        for topic in self._input_topics:
+            if topic == self._commands_topic:
+                def _on_command(msg):
+                    fut = asyncio.run_coroutine_threadsafe(self._handle_raw_command(msg), self._loop)
+                    fut.add_done_callback(lambda f: self._log_callback_error(f, "command"))
+                ok = self.bus.subscribe(topic, _on_command)
+                print(f"[{self.component_id}] Subscribe to {topic}: {ok}")
+            elif topic == self._home_topic:
+                def _on_home(msg):
+                    fut = asyncio.run_coroutine_threadsafe(self._handle_raw_home(msg), self._loop)
+                    fut.add_done_callback(lambda f: self._log_callback_error(f, "home"))
+                ok = self.bus.subscribe(topic, _on_home)
+                print(f"[{self.component_id}] Subscribe to {topic}: {ok}")
+        print(f"[{self.component_id}] Input topics: {self._input_topics}")
+        # Подписка на компонентный топик (для тестов и прямых вызовов)
+        super().start()
+
+    def _log_callback_error(self, future, topic_name):
+        try:
+            result = future.result()
+            print(f"[{self.component_id}] {topic_name} handled: {result}")
+        except Exception as e:
+            print(f"[{self.component_id}] Error in {topic_name} handler: {e}")
+
     async def _handle_raw_command(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Валидация команды и публикация верифицированной."""
         payload = message.get("payload", message)

@@ -121,7 +121,12 @@ class BaseAsyncComponent(ABC):
     def start(self):
         """Подписывается на топик и запускает шину."""
         self.bus.start()
-        self.bus.subscribe(self.topic, lambda msg: asyncio.ensure_future(self._handle_message(msg)))
+        # Запоминаем loop для вызова корутин из callback-потоков (mqtt/kafka worker threads)
+        self._loop = asyncio.get_event_loop()
+        self.bus.subscribe(
+            self.topic,
+            lambda msg: asyncio.run_coroutine_threadsafe(self._handle_message(msg), self._loop),
+        )
         self._running = True
         print(f"[{self.component_id}] Started. Listening on topic: {self.topic}")
 

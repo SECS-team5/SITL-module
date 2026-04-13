@@ -42,6 +42,7 @@ def main():
 
     # Запускаем infopanel
     loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
     def shutdown(sig, frame):
         print(f"[{component_id}] Shutting down...")

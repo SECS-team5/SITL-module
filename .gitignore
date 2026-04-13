@@ -1,0 +1,10 @@
+pip-cache/
+__pycache__/
+*.pyc
+*.log
+.env.local
+.env
+$null
+-p/
+venv/
+.venv/

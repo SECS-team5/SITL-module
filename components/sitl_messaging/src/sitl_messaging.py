@@ -3,6 +3,7 @@ SITL Messaging — компонент запросов/ответов позиц
 
 Адаптирован из SITL-module/messaging.py для работы через BaseAsyncComponent.
 """
+import asyncio
 import os
 from typing import Dict, Any, Optional
 
@@ -51,6 +52,12 @@ class SitlMessagingComponent(BaseAsyncComponent):
 
     def _register_handlers(self):
         self.register_handler("request_position", self._handle_request_position)
+
+    def start(self):
+        """Запускает шину и подписку на топик запросов."""
+        # self.topic уже установлен в POSITION_REQUEST_TOPIC через __init__
+        # super().start() подпишет на него же — не нужно дублировать
+        super().start()
 
     async def _handle_request_position(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Обработка запроса позиции дрона."""
