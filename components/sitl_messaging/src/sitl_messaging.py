@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional
 import redis.asyncio as redis
 
 from sdk.base_async_component import BaseAsyncComponent
+from sdk.messages import create_response
 from broker.system_bus import SystemBus
 
 from shared.contracts import (
@@ -82,13 +83,14 @@ class SitlMessagingComponent(BaseAsyncComponent):
             )
             return {"error": "invalid position in state"}
 
-        # Публикуем ответ в response топик
-        response_message = {
-            "action": "position_response",
-            "payload": response,
-            "drone_id": drone_id,
-            "correlation_id": message.get("correlation_id"),
-        }
+        # Публикуем ответ в response топик через SDK
+        response_message = create_response(
+            correlation_id=message.get("correlation_id"),
+            payload=response,
+            sender=self.component_id,
+            success=True,
+        )
+        response_message["drone_id"] = drone_id
         self.bus.publish(self._response_topic, response_message)
 
         self._infopanel.log_event(

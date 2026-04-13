@@ -8,6 +8,7 @@ import os
 from typing import Dict, Any, Optional
 
 from sdk.base_async_component import BaseAsyncComponent
+from sdk.messages import Message
 from broker.system_bus import SystemBus
 
 from shared.contracts import (
@@ -106,12 +107,12 @@ class SitlVerifierComponent(BaseAsyncComponent):
             message_type, self._verified_commands_topic, self._verified_home_topic
         )
         # Публикуем через SystemBus
-        verified_message = {
-            "action": "verified_message",
-            "payload": data,
-            "output_topic": output_topic,
-            "message_type": message_type,
-        }
+        verified_message = Message(
+            action="verified_message",
+            payload=data,
+            sender=self.component_id,
+        ).to_dict()
+        verified_message["message_type"] = message_type
         self.bus.publish(output_topic, verified_message)
         self._infopanel.log_event(
             f"Verified command drone_id={data.get('drone_id')} output={output_topic}",
@@ -134,12 +135,12 @@ class SitlVerifierComponent(BaseAsyncComponent):
         output_topic = resolve_verified_topic(
             message_type, self._verified_commands_topic, self._verified_home_topic
         )
-        verified_message = {
-            "action": "verified_message",
-            "payload": data,
-            "output_topic": output_topic,
-            "message_type": message_type,
-        }
+        verified_message = Message(
+            action="verified_message",
+            payload=data,
+            sender=self.component_id,
+        ).to_dict()
+        verified_message["message_type"] = message_type
         self.bus.publish(output_topic, verified_message)
         self._infopanel.log_event(
             f"Verified home drone_id={data.get('drone_id')} output={output_topic}",
