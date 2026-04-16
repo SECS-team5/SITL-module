@@ -94,6 +94,9 @@ services:
     restart: unless-stopped
 
   sitl_controller:
+    build:
+      context: .
+      dockerfile: components/sitl_controller/docker/Dockerfile
     image: sitl-module-controller:latest
     container_name: sitl-controller
     entrypoint: [""]
@@ -121,6 +124,9 @@ services:
     restart: unless-stopped
 
   sitl_core:
+    build:
+      context: .
+      dockerfile: components/sitl_core/docker/Dockerfile
     image: sitl-module-core:latest
     container_name: sitl-core
     entrypoint: [""]
@@ -147,6 +153,9 @@ services:
     restart: unless-stopped
 
   sitl_messaging:
+    build:
+      context: .
+      dockerfile: components/sitl_messaging/docker/Dockerfile
     image: sitl-module-messaging:latest
     container_name: sitl-messaging
     entrypoint: [""]

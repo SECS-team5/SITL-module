@@ -1,4 +1,4 @@
-FROM sitl-module-core:latest
+FROM python:3.11-slim
 
 WORKDIR /app
 
