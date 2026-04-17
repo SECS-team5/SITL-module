@@ -54,6 +54,12 @@ class SitlMessagingComponent(BaseAsyncComponent):
     def _register_handlers(self):
         self.register_handler("request_position", self._handle_request_position)
 
+    @staticmethod
+    def _get_transport_value(message: Dict[str, Any], payload: Dict[str, Any], field: str) -> Any:
+        if field in message:
+            return message[field]
+        return payload.get(field)
+
     def start(self):
         """Запускает шину и подписку на топик запросов."""
         # self.topic уже установлен в POSITION_REQUEST_TOPIC через __init__
@@ -115,13 +121,17 @@ class SitlMessagingComponent(BaseAsyncComponent):
 
         # Публикуем ответ в response топик через SDK
         response_message = create_response(
-            correlation_id=message.get("correlation_id"),
+            correlation_id=self._get_transport_value(message, payload, "correlation_id"),
             payload=response,
             sender=self.component_id,
             success=True,
         )
         response_message["drone_id"] = drone_id
-        self.bus.publish(self._response_topic, response_message)
+        response_topic = (
+            self._get_transport_value(message, payload, "reply_to")
+            or self._response_topic
+        )
+        self.bus.publish(response_topic, response_message)
 
         self._infopanel.log_event(
             f"Returned position for drone_id={drone_id}", "info"

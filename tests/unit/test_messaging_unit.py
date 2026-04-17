@@ -11,11 +11,31 @@ import pytest
 from shared import state, contracts  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def infopanel_env(monkeypatch):
+    monkeypatch.setenv("INFOPANEL_API_KEY", "test-api-key")
+
+
 @pytest.fixture
 def fake_redis():
     """Fake Redis для тестов."""
     from tests.unit.fakes import FakeRedis
     return FakeRedis()
+
+
+def _seed_drone_state(fake_redis, drone_id="drone_001"):
+    fake_redis.hashes[f"drone:{drone_id}:state"] = {
+        "status": "MOVING",
+        "lat": 59.9386,
+        "lon": 30.3141,
+        "alt": 100.0,
+        "vx": 0.0,
+        "vy": 0.0,
+        "vz": 0.0,
+        "home_lat": 59.9386,
+        "home_lon": 30.3141,
+        "home_alt": 100.0,
+    }
 
 
 def _make_messaging_component(fake_redis):
@@ -63,6 +83,35 @@ async def test_handle_request_position_returns_coordinates(fake_redis):
     assert "lon" in result
     assert "alt" in result
     assert result["lat"] == 59.9386
+    component.bus.publish.assert_called_once()
+    published_topic, response_message = component.bus.publish.call_args.args
+    assert published_topic == component._response_topic
+    assert response_message["correlation_id"] == "test-123"
+    assert response_message["payload"] == result
+    assert response_message["drone_id"] == "drone_001"
+
+
+@pytest.mark.asyncio
+async def test_handle_request_position_uses_reply_to_from_payload(fake_redis):
+    _seed_drone_state(fake_redis)
+    component = _make_messaging_component(fake_redis)
+
+    message = {
+        "payload": {
+            "drone_id": "drone_001",
+            "reply_to": "sitl.telemetry.response.demo",
+            "correlation_id": "payload-123",
+        }
+    }
+    result = await component._handle_request_position(message)
+
+    assert result is not None
+    component.bus.publish.assert_called_once()
+    published_topic, response_message = component.bus.publish.call_args.args
+    assert published_topic == "sitl.telemetry.response.demo"
+    assert response_message["correlation_id"] == "payload-123"
+    assert response_message["payload"] == result
+    assert response_message["drone_id"] == "drone_001"
 
 
 @pytest.mark.asyncio
