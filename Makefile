@@ -14,7 +14,7 @@ KAFKA_DEPS = kafka-python
 
 init:
 	@echo "=== Downloading dependencies to pip-cache/ ==="
-	@if not exist pip-cache mkdir pip-cache
+	@mkdir -p pip-cache
 	pip download --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -d pip-cache -r requirements.txt
 	@echo "=== Dependencies downloaded ==="
 
@@ -60,7 +60,7 @@ integration-test-mqtt: up-mqtt up-redis up-sitl
 	@echo ""
 	@echo "=== Integration tests (MQTT) ==="
 	@echo "Waiting for components to be ready..."
-	@timeout /t 15 || ping -n 15 127.0.0.1 >nul
+	@sleep 15
 	@docker compose run --rm --no-deps \
 		-e BROKER_BACKEND=mqtt \
 		-e MQTT_BROKER=mosquitto \
