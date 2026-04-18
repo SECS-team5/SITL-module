@@ -89,32 +89,6 @@ class SitlControllerComponent(BaseAsyncComponent):
             print(f"[{self.component_id}] Error in {topic_name} handler: {e}")
             traceback.print_exc()
 
-    def _print_drone_state(self, drone_id: str, state: Dict[str, Any], action: str):
-        """Вывод состояния дрона в консоль."""
-        print("\n" + "="*80)
-        print(f"[DRONE STATE] Действие: {action}")
-        print(f"[DRONE STATE] Дрон ID: {drone_id}")
-        print(f"[DRONE STATE] Статус: {state.get('status', 'N/A')}")
-        print("-"*80)
-        print(f"[DRONE STATE] Текущие координаты:")
-        print(f"  X: {state.get('x', 'N/A')}")
-        print(f"  Y: {state.get('y', 'N/A')}")
-        print(f"  Z: {state.get('z', 'N/A')}")
-        print("-"*80)
-        print(f"[DRONE STATE] Вектор направления (скорость):")
-        print(f"  VX: {state.get('vx', 'N/A')}")
-        print(f"  VY: {state.get('vy', 'N/A')}")
-        print(f"  VZ: {state.get('vz', 'N/A')}")
-        print("-"*80)
-        if state.get('home_x') is not None:
-            print(f"[DRONE STATE] Домашняя локация:")
-            print(f"  Home X: {state.get('home_x', 'N/A')}")
-            print(f"  Home Y: {state.get('home_y', 'N/A')}")
-            print(f"  Home Z: {state.get('home_z', 'N/A')}")
-        else:
-            print(f"[DRONE STATE] Домашняя локация: НЕ УСТАНОВЛЕНА")
-        print("="*80 + "\n")
-
     async def _handle_verified_message(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Обработка верифицированного сообщения."""
         payload = message.get("payload", message)
@@ -163,8 +137,6 @@ class SitlControllerComponent(BaseAsyncComponent):
                 f"Stored HOME for drone_id={drone_id} status={next_state['status']}",
                 "info",
             )
-            # Вывод состояния в консоль
-            self._print_drone_state(drone_id, next_state, "HOME УСТАНОВЛЕН")
             return {"status": "home_stored", "drone_id": drone_id}
 
         if not existing_state or not state_has_home(existing_state):
@@ -181,8 +153,6 @@ class SitlControllerComponent(BaseAsyncComponent):
             f"vx={next_state['vx']} vy={next_state['vy']} vz={next_state['vz']}",
             "info",
         )
-        # Вывод состояния в консоль
-        self._print_drone_state(drone_id, next_state, "КОМАНДА ПРИМЕНЕНА")
         return {
             "status": "command_applied",
             "drone_id": drone_id,
