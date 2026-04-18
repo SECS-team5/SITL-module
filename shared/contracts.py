@@ -9,16 +9,37 @@ from uuid import uuid4
 
 from jsonschema import Draft202012Validator
 
+# Схемы для команд и позиций
 COMMAND_SCHEMA_NAME = "sitl-commands.json"
 HOME_SCHEMA_NAME = "sitl-drone-home.json"
 POSITION_REQUEST_SCHEMA_NAME = "sitl-position-request.json"
 POSITION_RESPONSE_SCHEMA_NAME = "sitl-position-response.json"
+
+# Схемы для списка дронов и bulk-запросов
+DRONES_LIST_REQUEST_SCHEMA_NAME = "sitl-drones-list-request.json"
+DRONES_LIST_RESPONSE_SCHEMA_NAME = "sitl-drones-list-response.json"
+ALL_POSITIONS_REQUEST_SCHEMA_NAME = "sitl-all-positions-request.json"
+ALL_POSITIONS_RESPONSE_SCHEMA_NAME = "sitl-all-positions-response.json"
+
+# Общие константы
 VERIFIER_STAGE = "SITL-v1"
 SCHEMAS_DIR = Path(__file__).resolve().parents[1] / "schemas"
+
+# Топики для верифицированных сообщений
 VERIFIED_COMMAND_TOPIC_DEFAULT = "sitl.verified-commands"
 VERIFIED_HOME_TOPIC_DEFAULT = "sitl.verified-home"
+
+# Топики для запроса позиции одного дрона
 POSITION_REQUEST_TOPIC_DEFAULT = "sitl.telemetry.request"
 POSITION_RESPONSE_TOPIC_DEFAULT = "sitl.telemetry.response"
+
+# Топики для управления списком дронов
+DRONES_LIST_REQUEST_TOPIC_DEFAULT = "sitl.drones.list.request"
+DRONES_LIST_RESPONSE_TOPIC_DEFAULT = "sitl.drones.list.response"
+
+# Топики для bulk-запроса позиций всех дронов
+ALL_POSITIONS_REQUEST_TOPIC_DEFAULT = "sitl.positions.all.request"
+ALL_POSITIONS_RESPONSE_TOPIC_DEFAULT = "sitl.positions.all.response"
 
 
 def parse_json_payload(raw: Any) -> dict[str, Any] | None:
