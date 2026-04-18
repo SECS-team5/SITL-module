@@ -66,6 +66,32 @@ class SitlMessagingComponent(BaseAsyncComponent):
         # super().start() подпишет на него же — не нужно дублировать
         super().start()
 
+    def _print_drone_info(self, drone_id: str, state: Dict[str, Any], response: Dict[str, Any]):
+        """Вывод полной информации о дроне в консоль при запросе позиции."""
+        print("\n" + "="*80)
+        print(f"[POSITION REQUEST] Запрос позиции дрона")
+        print(f"[POSITION REQUEST] Дрон ID: {drone_id}")
+        print(f"[POSITION REQUEST] Статус: {state.get('status', 'N/A')}")
+        print("-"*80)
+        print(f"[POSITION REQUEST] Текущие координаты:")
+        print(f"  X: {response.get('x', 'N/A')}")
+        print(f"  Y: {response.get('y', 'N/A')}")
+        print(f"  Z: {response.get('z', 'N/A')}")
+        print("-"*80)
+        print(f"[POSITION REQUEST] Вектор направления (скорость):")
+        print(f"  VX: {state.get('vx', 'N/A')}")
+        print(f"  VY: {state.get('vy', 'N/A')}")
+        print(f"  VZ: {state.get('vz', 'N/A')}")
+        print("-"*80)
+        if state.get('home_x') is not None:
+            print(f"[POSITION REQUEST] Домашняя локация:")
+            print(f"  Home X: {state.get('home_x', 'N/A')}")
+            print(f"  Home Y: {state.get('home_y', 'N/A')}")
+            print(f"  Home Z: {state.get('home_z', 'N/A')}")
+        else:
+            print(f"[POSITION REQUEST] Домашняя локация: НЕ УСТАНОВЛЕНА")
+        print("="*80 + "\n")
+
     async def _handle_request_position(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Обработка запроса позиции дрона."""
         payload = message.get("payload", message)
@@ -82,12 +108,16 @@ class SitlMessagingComponent(BaseAsyncComponent):
             self._infopanel.log_event(f"drone '{drone_id}' state not found", "warning")
             return {"error": f"drone '{drone_id}' state not found"}
 
-        response = build_position_response(normalize_state(raw_state))
+        state = normalize_state(raw_state)
+        response = build_position_response(state)
         if response is None:
             self._infopanel.log_event(
                 f"drone '{drone_id}' state does not contain a valid position", "warning"
             )
             return {"error": "invalid position in state"}
+
+        # Вывод полной информации о дроне в консоль
+        self._print_drone_info(drone_id, state, response)
 
         # Публикуем ответ в response топик через SDK
         response_message = create_response(

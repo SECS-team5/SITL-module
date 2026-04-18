@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SITL Drones List Response",
+  "type": "object",
+  "required": ["drone_ids", "count"],
+  "properties": {
+    "drone_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Список ID активных дронов"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Количество дронов"
+    }
+  },
+  "additionalProperties": false
+}

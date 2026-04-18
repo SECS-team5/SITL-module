@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SITL All Positions Response",
+  "type": "object",
+  "required": ["positions", "count"],
+  "properties": {
+    "positions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "x": {"type": "number"},
+          "y": {"type": "number"},
+          "z": {"type": "number"}
+        }
+      },
+      "description": "Словарь позиций {drone_id: {x, y, z}}"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Количество дронов"
+    },
+    "errors": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Ошибки для конкретных дронов {drone_id: error_message}"
+    }
+  },
+  "additionalProperties": false
+}

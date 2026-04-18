@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SITL All Positions Request",
+  "type": "object",
+  "properties": {
+    "drone_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Список ID дронов (опционально, если пусто - все)"
+    }
+  },
+  "additionalProperties": true
+}
