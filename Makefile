@@ -6,7 +6,7 @@ export BROKER_BACKEND ?= mqtt
 MQTT_DEPS = paho-mqtt
 KAFKA_DEPS = kafka-python
 
-.PHONY: up-kafka up-mqtt up-sitl up down logs \
+.PHONY: up-kafka up-mqtt up-sitl up up-demo down logs \
         unit-test integration-test integration-test-mqtt integration-test-kafka \
         wait-mqtt wait-kafka clean init
 
@@ -40,6 +40,11 @@ up-sitl: up-redis
 
 up: up-sitl
 	@echo "SITL components started. BROKER_BACKEND=$(BROKER_BACKEND)"
+
+up-demo:
+	@echo "Starting demo site (BROKER_BACKEND=$(BROKER_BACKEND))..."
+	docker compose up -d --build demo_site
+	@echo "Demo site is available at http://localhost:8080"
 
 down:
 	docker compose down

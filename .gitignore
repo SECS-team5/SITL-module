@@ -9,3 +9,4 @@ $null
 venv/
 .venv/
 QWEN.md
+.claude/

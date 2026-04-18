@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SITL Demo</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <span class="logo"></span>
+        <div>
+          <div class="brand-title">SITL</div>
+          <div class="brand-sub">Визуализация работы модуля с несколькими дронами</div>
+        </div>
+      </div>
+      <div class="flow" id="flow">
+        <span class="flow-item"><span class="arrow">→</span><span id="flowCommands">0</span> команд</span>
+        <span class="flow-sep">·</span>
+        <span class="flow-item"><span class="arrow">←</span><span id="flowResponses">0</span> ответов</span>
+        <span class="flow-sep">·</span>
+        <span class="flow-item" id="flowRateWrap"><span id="flowRate">0</span> msg/s</span>
+      </div>
+      <div class="controls">
+        <label class="count-field">
+          <span>Сценарий</span>
+          <select id="scenarioSelect" class="count-select"></select>
+        </label>
+        <label class="count-field">
+          <span>Дронов</span>
+          <input type="number" id="countInput" min="1" max="16" value="6">
+        </label>
+        <button id="startBtn" class="btn primary">Запустить</button>
+        <button id="stopBtn" class="btn">Остановить</button>
+        <div class="badge" id="badge">…</div>
+      </div>
+    </header>
+
+    <section class="pipeline" id="pipeline">
+      <div class="pipe-node" data-node="runner">
+        <span class="pipe-dot"></span>
+        <span class="pipe-label">Runner</span>
+        <span class="pipe-count">0</span>
+      </div>
+      <span class="pipe-arrow">›</span>
+      <div class="pipe-node" data-node="verifier">
+        <span class="pipe-dot"></span>
+        <span class="pipe-label">Verifier</span>
+        <span class="pipe-count">0</span>
+      </div>
+      <span class="pipe-arrow">›</span>
+      <div class="pipe-node" data-node="controller">
+        <span class="pipe-dot"></span>
+        <span class="pipe-label">Controller</span>
+        <span class="pipe-count">0</span>
+      </div>
+      <span class="pipe-arrow">›</span>
+      <div class="pipe-node" data-node="core">
+        <span class="pipe-dot"></span>
+        <span class="pipe-label">Core</span>
+        <span class="pipe-count">0</span>
+      </div>
+      <span class="pipe-arrow">›</span>
+      <div class="pipe-node" data-node="messaging">
+        <span class="pipe-dot"></span>
+        <span class="pipe-label">Messaging</span>
+        <span class="pipe-count">0</span>
+      </div>
+    </section>
+
+    <main class="view">
+      <canvas id="canvas"></canvas>
+      <aside class="panel">
+        <div class="panel-head">
+          <span>Дроны</span>
+          <span class="count" id="droneCount">0</span>
+        </div>
+        <div class="drone-list" id="droneList"></div>
+        <details class="manual" id="manualPanel">
+          <summary>Ручная команда</summary>
+          <form id="manualForm" class="manual-form" autocomplete="off">
+            <label class="m-row">
+              <span>Дрон</span>
+              <select id="manualDrone"></select>
+            </label>
+            <div class="m-tabs">
+              <button type="button" class="m-tab active" data-tab="cmd">Скорость</button>
+              <button type="button" class="m-tab" data-tab="home">HOME</button>
+              <button type="button" class="m-tab" data-tab="raw">Сырое</button>
+            </div>
+            <div class="m-section" data-section="cmd">
+              <div class="m-grid">
+                <label><span>vx</span><input id="mVx" type="number" step="0.1" value="0"></label>
+                <label><span>vy</span><input id="mVy" type="number" step="0.1" value="0"></label>
+                <label><span>vz</span><input id="mVz" type="number" step="0.1" value="0"></label>
+                <label><span>курс°</span><input id="mHdg" type="number" step="1" min="0" max="359" placeholder="auto"></label>
+              </div>
+              <button type="submit" class="btn primary m-submit" data-action="cmd">Отправить команду</button>
+            </div>
+            <div class="m-section" data-section="home" hidden>
+              <div class="m-grid">
+                <label><span>lat</span><input id="mLat" type="number" step="0.00001" value="59.9386"></label>
+                <label><span>lon</span><input id="mLon" type="number" step="0.00001" value="30.3141"></label>
+                <label class="m-wide"><span>alt, м</span><input id="mAlt" type="number" step="1" value="120"></label>
+              </div>
+              <button type="submit" class="btn primary m-submit" data-action="home">Задать HOME</button>
+            </div>
+            <div class="m-section" data-section="raw" hidden>
+              <label class="m-row">
+                <span>Топик</span>
+                <select id="rawTopic">
+                  <option value="sitl.commands">sitl.commands</option>
+                  <option value="sitl-drone-home">sitl-drone-home</option>
+                  <option value="sitl.telemetry.request">sitl.telemetry.request</option>
+                </select>
+              </label>
+              <label class="m-row">
+                <span>Пресет</span>
+                <select id="rawPreset"></select>
+              </label>
+              <textarea id="rawPayload" class="m-textarea" rows="7" spellcheck="false"></textarea>
+              <button type="submit" class="btn primary m-submit" data-action="raw">Отправить в брокер</button>
+            </div>
+            <div class="m-status" id="manualStatus"></div>
+          </form>
+        </details>
+      </aside>
+    </main>
+
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>

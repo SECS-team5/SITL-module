@@ -72,6 +72,7 @@ services:
     command: ["sh", "-c", "pip install --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -q -r requirements.txt 2>/dev/null; python -u -m components.sitl_verifier"]
     volumes:
       - .:/app
+      - pip_cache:/root/.cache/pip
     working_dir: /app
     environment:
       BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
@@ -103,6 +104,7 @@ services:
     command: ["sh", "-c", "pip install --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -q -r requirements.txt 2>/dev/null; python -u -m components.sitl_controller"]
     volumes:
       - .:/app
+      - pip_cache:/root/.cache/pip
     working_dir: /app
     environment:
       BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
@@ -133,6 +135,7 @@ services:
     command: ["sh", "-c", "pip install --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -q -r requirements.txt 2>/dev/null; python -u -m components.sitl_core"]
     volumes:
       - .:/app
+      - pip_cache:/root/.cache/pip
     working_dir: /app
     environment:
       BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
@@ -162,6 +165,7 @@ services:
     command: ["sh", "-c", "pip install --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -q -r requirements.txt 2>/dev/null; python -u -m components.sitl_messaging"]
     volumes:
       - .:/app
+      - pip_cache:/root/.cache/pip
     working_dir: /app
     environment:
       BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
@@ -181,9 +185,47 @@ services:
       INFOPANEL_SERVICE_ID: ${INFOPANEL_SERVICE_ID:-5}
     restart: unless-stopped
 
+  demo_site:
+    build:
+      context: .
+      dockerfile: demo_site/docker/Dockerfile
+    image: sitl-module-demo-site:latest
+    container_name: sitl-demo-site
+    entrypoint: [""]
+    command: ["sh", "-c", "pip install --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -q -r requirements.txt 2>/dev/null; python -u -m demo_site"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/app
+      - pip_cache:/root/.cache/pip
+    working_dir: /app
+    environment:
+      BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
+      KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
+      MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USER: ${MQTT_USER:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_QOS: ${MQTT_QOS:-1}
+      COMMAND_TOPIC: ${COMMAND_TOPIC:-sitl.commands}
+      HOME_TOPIC: ${HOME_TOPIC:-sitl-drone-home}
+      POSITION_REQUEST_TOPIC: ${POSITION_REQUEST_TOPIC:-sitl.telemetry.request}
+      POSITION_RESPONSE_TOPIC: ${POSITION_RESPONSE_TOPIC:-sitl.telemetry.response}
+      DEMO_HOST: ${DEMO_HOST:-0.0.0.0}
+      DEMO_PORT: ${DEMO_PORT:-8080}
+      DEMO_CENTER_LAT: ${DEMO_CENTER_LAT:-59.9386}
+      DEMO_CENTER_LON: ${DEMO_CENTER_LON:-30.3141}
+      DEMO_CENTER_ALT: ${DEMO_CENTER_ALT:-120.0}
+      DEMO_REQUEST_INTERVAL_SEC: ${DEMO_REQUEST_INTERVAL_SEC:-0.65}
+      DEMO_REQUEST_TIMEOUT_SEC: ${DEMO_REQUEST_TIMEOUT_SEC:-2.0}
+      DEMO_COMMAND_INTERVAL_SEC: ${DEMO_COMMAND_INTERVAL_SEC:-0.75}
+      DEMO_RESPONSE_TOPIC: ${DEMO_RESPONSE_TOPIC:-sitl.telemetry.response.demo-site}
+    restart: unless-stopped
+
 networks:
   default:
     name: sitl-network
 
 volumes:
   redis_data:
+  pip_cache:

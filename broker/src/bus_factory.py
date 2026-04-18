@@ -6,8 +6,6 @@ import os
 from typing import Dict, Optional
 
 from .system_bus import SystemBus
-from broker.kafka.kafka_system_bus import KafkaSystemBus
-from broker.mqtt.mqtt_system_bus import MQTTSystemBus
 
 
 def create_system_bus(
@@ -43,6 +41,8 @@ def create_system_bus(
         mqtt_config = config["broker"].get("mqtt", {})
 
     if bus_type == "kafka":
+        from broker.kafka.kafka_system_bus import KafkaSystemBus
+
         bootstrap_servers = kafka_config.get(
             "bootstrap_servers",
             os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
@@ -62,6 +62,8 @@ def create_system_bus(
         )
 
     elif bus_type == "mqtt":
+        from broker.mqtt.mqtt_system_bus import MQTTSystemBus
+
         broker = mqtt_config.get("broker", os.getenv("MQTT_BROKER", "localhost"))
         port = mqtt_config.get("port", int(os.getenv("MQTT_PORT", "1883")))
         cid = client_id or mqtt_config.get(
