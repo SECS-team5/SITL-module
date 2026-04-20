@@ -79,7 +79,11 @@ class BaseAsyncComponent(ABC):
 
         try:
             result = await handler(message)
-            if message.get("reply_to") and result is not None:
+            if (
+                message.get("reply_to")
+                and result is not None
+                and not message.get("_response_sent")
+            ):
                 response = create_response(
                     correlation_id=message.get("correlation_id"),
                     payload=result,
@@ -112,6 +116,16 @@ class BaseAsyncComponent(ABC):
             "background_tasks": len(self._background_tasks),
         }
 
+    def _on_message(self, message: Dict[str, Any]):
+        future = asyncio.run_coroutine_threadsafe(self._handle_message(message), self._loop)
+        future.add_done_callback(self._log_callback_error)
+
+    def _log_callback_error(self, future):
+        try:
+            future.result()
+        except Exception as exc:
+            print(f"[{self.component_id}] Error in async callback: {exc}")
+
     def add_background_task(self, coro):
         """Добавляет фоновую async-задачу."""
         task = asyncio.create_task(coro)
@@ -125,7 +139,7 @@ class BaseAsyncComponent(ABC):
         self._loop = asyncio.get_event_loop()
         self.bus.subscribe(
             self.topic,
-            lambda msg: asyncio.run_coroutine_threadsafe(self._handle_message(msg), self._loop),
+            self._on_message,
         )
         self._running = True
         print(f"[{self.component_id}] Started. Listening on topic: {self.topic}")

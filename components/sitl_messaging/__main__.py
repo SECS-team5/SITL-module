@@ -15,8 +15,7 @@ if project_root not in sys.path:
 
 def main():
     """Запуск SITL Messaging с брокером."""
-    from broker.src.system_bus import SystemBus
-    from broker.src.bus_factory import create_system_bus
+    from broker.bus_factory import create_system_bus
     from components.sitl_messaging.src.sitl_messaging import SitlMessagingComponent
     from shared.contracts import POSITION_REQUEST_TOPIC_DEFAULT
 

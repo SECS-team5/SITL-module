@@ -15,8 +15,7 @@ if project_root not in sys.path:
 
 def main():
     """Запуск SITL Controller с брокером."""
-    from broker.src.system_bus import SystemBus
-    from broker.src.bus_factory import create_system_bus
+    from broker.bus_factory import create_system_bus
     from components.sitl_controller.src.sitl_controller import SitlControllerComponent
 
     # Маппинг переменных окружения

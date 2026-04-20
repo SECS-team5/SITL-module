@@ -14,7 +14,7 @@ try:
 except ImportError:
     MQTT_AVAILABLE = False
 
-from broker.src.system_bus import SystemBus
+from broker.system_bus import SystemBus
 
 
 class MQTTSystemBus(SystemBus):

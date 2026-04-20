@@ -65,22 +65,36 @@ class SitlControllerComponent(BaseAsyncComponent):
         self.register_handler("verified_message", self._handle_verified_message)
 
     def start(self):
-        """Подписывается на verified-топики + свой компонентный топик."""
-        self._loop = asyncio.get_event_loop()
-        # Подписка на верифицированные топики (от Verifier)
-        def _on_verified_commands(msg):
-            fut = asyncio.run_coroutine_threadsafe(self._handle_verified_message(msg), self._loop)
-            fut.add_done_callback(lambda f: self._log_callback_error(f, "commands"))
-        def _on_verified_home(msg):
-            fut = asyncio.run_coroutine_threadsafe(self._handle_verified_message(msg), self._loop)
-            fut.add_done_callback(lambda f: self._log_callback_error(f, "home"))
-        self.bus.subscribe(self._verified_commands_topic, _on_verified_commands)
-        self.bus.subscribe(self._verified_home_topic, _on_verified_home)
-        print(f"[{self.component_id}] Subscribed to verified topics: {self._verified_commands_topic}, {self._verified_home_topic}")
-        # Подписка на компонентный топик (для тестов и прямых вызовов)
+        """Start bus before subscribing to verified topics."""
         super().start()
 
-    def _log_callback_error(self, future, topic_name):
+        def _on_verified_commands(msg):
+            fut = asyncio.run_coroutine_threadsafe(
+                self._handle_verified_message(msg), self._loop
+            )
+            fut.add_done_callback(
+                lambda f: self._log_topic_callback_error(f, "commands")
+            )
+
+        def _on_verified_home(msg):
+            fut = asyncio.run_coroutine_threadsafe(
+                self._handle_verified_message(msg), self._loop
+            )
+            fut.add_done_callback(
+                lambda f: self._log_topic_callback_error(f, "home")
+            )
+
+        ok_commands = self.bus.subscribe(
+            self._verified_commands_topic, _on_verified_commands
+        )
+        ok_home = self.bus.subscribe(self._verified_home_topic, _on_verified_home)
+        print(
+            f"[{self.component_id}] Subscribed to verified topics: "
+            f"{self._verified_commands_topic}={ok_commands}, "
+            f"{self._verified_home_topic}={ok_home}"
+        )
+
+    def _log_topic_callback_error(self, future, topic_name):
         try:
             result = future.result()
             print(f"[{self.component_id}] {topic_name} handled: {result}")

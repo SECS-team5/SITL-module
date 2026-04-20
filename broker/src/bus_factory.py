@@ -6,8 +6,6 @@ import os
 from typing import Dict, Optional
 
 from .system_bus import SystemBus
-from broker.kafka.kafka_system_bus import KafkaSystemBus
-from broker.mqtt.mqtt_system_bus import MQTTSystemBus
 
 
 def create_system_bus(
@@ -31,7 +29,7 @@ def create_system_bus(
         if config and "broker" in config and "type" in config["broker"]:
             bus_type = config["broker"]["type"]
         else:
-            bus_type = os.getenv("BROKER_TYPE", "kafka")
+            bus_type = os.getenv("BROKER_TYPE") or os.getenv("BROKER_BACKEND", "kafka")
 
     bus_type = bus_type.lower()
 
@@ -43,9 +41,14 @@ def create_system_bus(
         mqtt_config = config["broker"].get("mqtt", {})
 
     if bus_type == "kafka":
+        from broker.kafka.kafka_system_bus import KafkaSystemBus
+
         bootstrap_servers = kafka_config.get(
             "bootstrap_servers",
-            os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+            os.getenv(
+                "KAFKA_BOOTSTRAP_SERVERS",
+                os.getenv("KAFKA_SERVERS", "localhost:9092")
+            )
         )
         cid = client_id or kafka_config.get(
             "client_id",
@@ -55,13 +58,35 @@ def create_system_bus(
             "group_id",
             os.getenv("KAFKA_GROUP_ID")
         )
+        username = kafka_config.get(
+            "username",
+            os.getenv("KAFKA_SASL_USERNAME", os.getenv("BROKER_USER"))
+        )
+        password = kafka_config.get(
+            "password",
+            os.getenv("KAFKA_SASL_PASSWORD", os.getenv("BROKER_PASSWORD"))
+        )
+        security_protocol = kafka_config.get(
+            "security_protocol",
+            os.getenv("KAFKA_SECURITY_PROTOCOL")
+        )
+        sasl_mechanism = kafka_config.get(
+            "sasl_mechanism",
+            os.getenv("KAFKA_SASL_MECHANISM")
+        )
         return KafkaSystemBus(
             bootstrap_servers=bootstrap_servers,
             client_id=cid,
-            group_id=group_id
+            group_id=group_id,
+            username=username,
+            password=password,
+            security_protocol=security_protocol,
+            sasl_mechanism=sasl_mechanism,
         )
 
     elif bus_type == "mqtt":
+        from broker.mqtt.mqtt_system_bus import MQTTSystemBus
+
         broker = mqtt_config.get("broker", os.getenv("MQTT_BROKER", "localhost"))
         port = mqtt_config.get("port", int(os.getenv("MQTT_PORT", "1883")))
         cid = client_id or mqtt_config.get(

@@ -10,12 +10,21 @@ from concurrent.futures import Future
 
 try:
     from kafka import KafkaProducer, KafkaConsumer
-    from kafka.errors import KafkaError
+    from kafka.errors import KafkaError, NoBrokersAvailable
     KAFKA_AVAILABLE = True
 except ImportError:
+    KafkaProducer = None
+    KafkaConsumer = None
+
+    class KafkaError(Exception):
+        pass
+
+    class NoBrokersAvailable(Exception):
+        pass
+
     KAFKA_AVAILABLE = False
 
-from broker.src.system_bus import SystemBus
+from broker.system_bus import SystemBus
 from broker.config import get_kafka_bootstrap
 
 
@@ -27,7 +36,9 @@ class KafkaSystemBus(SystemBus):
         client_id: str = "system_bus",
         group_id: str = None,
         username: str = None,
-        password: str = None
+        password: str = None,
+        security_protocol: str = None,
+        sasl_mechanism: str = None
     ):
         if not KAFKA_AVAILABLE:
             raise ImportError(
@@ -37,8 +48,26 @@ class KafkaSystemBus(SystemBus):
         self.bootstrap_servers = bootstrap_servers or get_kafka_bootstrap()
         self.client_id = client_id
         self.group_id = group_id or f"{client_id}_group"
-        self.username = username or os.environ.get("BROKER_USER")
-        self.password = password or os.environ.get("BROKER_PASSWORD")
+        self.username = (
+            username
+            or os.environ.get("KAFKA_SASL_USERNAME")
+            or os.environ.get("BROKER_USER")
+        )
+        self.password = (
+            password
+            or os.environ.get("KAFKA_SASL_PASSWORD")
+            or os.environ.get("BROKER_PASSWORD")
+        )
+        self.security_protocol = (
+            security_protocol
+            or os.environ.get("KAFKA_SECURITY_PROTOCOL")
+            or ("SASL_PLAINTEXT" if self.username and self.password else "PLAINTEXT")
+        )
+        self.sasl_mechanism = (
+            sasl_mechanism
+            or os.environ.get("KAFKA_SASL_MECHANISM")
+            or "PLAIN"
+        )
         self._producer: Optional[KafkaProducer] = None
         self._consumers: Dict[str, KafkaConsumer] = {}
         self._callbacks: Dict[str, Callable[[Dict[str, Any]], None]] = {}
@@ -49,15 +78,17 @@ class KafkaSystemBus(SystemBus):
         self._reply_topic = f"replies.{client_id}.{uuid4().hex[:8]}"
         self._started = False
 
-    def _get_sasl_config(self) -> dict:
+    def get_sasl_config(self) -> dict:
         """SASL-конфиг для producer/consumer, если заданы username/password."""
         if self.username and self.password:
             return {
-                'security_protocol': 'SASL_PLAINTEXT',
-                'sasl_mechanism': 'PLAIN',
+                'security_protocol': self.security_protocol,
+                'sasl_mechanism': self.sasl_mechanism,
                 'sasl_plain_username': self.username,
                 'sasl_plain_password': self.password
             }
+        if self.security_protocol and self.security_protocol != "PLAINTEXT":
+            return {'security_protocol': self.security_protocol}
         return {}
 
     def _init_producer(self):
@@ -68,15 +99,42 @@ class KafkaSystemBus(SystemBus):
                 'client_id': self.client_id,
                 'value_serializer': lambda v: json.dumps(v).encode('utf-8'),
                 'acks': 'all',
-                **self._get_sasl_config()
+                **self.get_sasl_config()
             }
             self._producer = KafkaProducer(**config)
+
+    def _init_producer_with_retry(self):
+        """Wait for Kafka to become available during cold starts."""
+        max_attempts = max(1, int(os.environ.get("KAFKA_STARTUP_MAX_ATTEMPTS", "20")))
+        retry_delay = max(
+            0.1,
+            float(os.environ.get("KAFKA_STARTUP_RETRY_DELAY_SEC", "3")),
+        )
+        last_error: Optional[Exception] = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                self._init_producer()
+                return
+            except Exception as exc:
+                last_error = exc
+                if attempt == max_attempts:
+                    break
+                print(
+                    f"Kafka broker not ready for client_id={self.client_id} "
+                    f"(attempt {attempt}/{max_attempts}): {exc}. "
+                    f"Retrying in {retry_delay:.1f}s..."
+                )
+                time.sleep(retry_delay)
+
+        if last_error is not None:
+            raise last_error
 
     def start(self) -> None:
         """Запускает bus, создаёт reply-топик и подписывается на ответы."""
         if self._started:
             return
-        self._init_producer()
+        self._init_producer_with_retry()
         try:
             self._producer.send(self._reply_topic, {"_init": True}).get(timeout=10)
         except Exception:
@@ -131,12 +189,10 @@ class KafkaSystemBus(SystemBus):
         """Цикл чтения сообщений из топика и вызова callback."""
         consumer = self._consumers.get(topic)
         callback = self._callbacks.get(topic)
-        
+
         if not consumer or not callback:
             return
-        for _ in range(3):
-            consumer.poll(timeout_ms=500)
-        
+
         while self._running.get(topic, False):
             try:
                 messages = consumer.poll(timeout_ms=1000)
@@ -170,9 +226,24 @@ class KafkaSystemBus(SystemBus):
                 'value_deserializer': lambda m: json.loads(m.decode('utf-8')),
                 'auto_offset_reset': 'earliest',
                 'enable_auto_commit': True,
-                **self._get_sasl_config()
+                **self.get_sasl_config()
             }
             consumer = KafkaConsumer(topic, **config)
+
+            # Ждём фактического назначения партиций (group join/rebalance),
+            # иначе сообщения, опубликованные сразу после subscribe(), теряются.
+            assign_timeout = float(
+                os.environ.get("KAFKA_SUBSCRIBE_ASSIGN_TIMEOUT_SEC", "10")
+            )
+            deadline = time.time() + assign_timeout
+            while not consumer.assignment() and time.time() < deadline:
+                consumer.poll(timeout_ms=200)
+            if not consumer.assignment():
+                print(
+                    f"Warning: consumer for {topic} did not receive partition "
+                    f"assignment within {assign_timeout}s"
+                )
+
             self._consumers[topic] = consumer
             self._running[topic] = True
             thread = threading.Thread(
@@ -183,7 +254,6 @@ class KafkaSystemBus(SystemBus):
             )
             thread.start()
             self._consumer_threads[topic] = thread
-            time.sleep(2.0)
             return True
         except Exception as e:
             print(f"Error subscribing to {topic}: {e}")
