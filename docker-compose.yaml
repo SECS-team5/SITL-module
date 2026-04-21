@@ -68,14 +68,13 @@ services:
       dockerfile: components/sitl_verifier/docker/Dockerfile
     image: sitl-module-verifier:latest
     container_name: sitl-verifier
-    entrypoint: [""]
-    command: ["sh", "-c", "pip install --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -q -r requirements.txt 2>/dev/null; python -u -m components.sitl_verifier"]
-    volumes:
-      - .:/app
-    working_dir: /app
     environment:
-      BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
-      KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
+      BROKER_BACKEND: ${BROKER_TYPE:-${BROKER_BACKEND:-kafka}}
+      BROKER_TYPE: ${BROKER_TYPE:-${BROKER_BACKEND:-kafka}}
+      KAFKA_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-${KAFKA_SERVERS:-kafka:29092}}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-${KAFKA_SERVERS:-kafka:29092}}
+      BROKER_USER: ${BROKER_USER:-${KAFKA_SASL_USERNAME:-}}
+      BROKER_PASSWORD: ${BROKER_PASSWORD:-${KAFKA_SASL_PASSWORD:-}}
       MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-}
@@ -94,16 +93,18 @@ services:
     restart: unless-stopped
 
   sitl_controller:
+    build:
+      context: .
+      dockerfile: components/sitl_controller/docker/Dockerfile
     image: sitl-module-controller:latest
     container_name: sitl-controller
-    entrypoint: [""]
-    command: ["sh", "-c", "pip install --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -q -r requirements.txt 2>/dev/null; python -u -m components.sitl_controller"]
-    volumes:
-      - .:/app
-    working_dir: /app
     environment:
-      BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
-      KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
+      BROKER_BACKEND: ${BROKER_TYPE:-${BROKER_BACKEND:-kafka}}
+      BROKER_TYPE: ${BROKER_TYPE:-${BROKER_BACKEND:-kafka}}
+      KAFKA_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-${KAFKA_SERVERS:-kafka:29092}}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-${KAFKA_SERVERS:-kafka:29092}}
+      BROKER_USER: ${BROKER_USER:-${KAFKA_SASL_USERNAME:-}}
+      BROKER_PASSWORD: ${BROKER_PASSWORD:-${KAFKA_SASL_PASSWORD:-}}
       MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-}
@@ -121,16 +122,18 @@ services:
     restart: unless-stopped
 
   sitl_core:
+    build:
+      context: .
+      dockerfile: components/sitl_core/docker/Dockerfile
     image: sitl-module-core:latest
     container_name: sitl-core
-    entrypoint: [""]
-    command: ["sh", "-c", "pip install --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -q -r requirements.txt 2>/dev/null; python -u -m components.sitl_core"]
-    volumes:
-      - .:/app
-    working_dir: /app
     environment:
-      BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
-      KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
+      BROKER_BACKEND: ${BROKER_TYPE:-${BROKER_BACKEND:-kafka}}
+      BROKER_TYPE: ${BROKER_TYPE:-${BROKER_BACKEND:-kafka}}
+      KAFKA_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-${KAFKA_SERVERS:-kafka:29092}}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-${KAFKA_SERVERS:-kafka:29092}}
+      BROKER_USER: ${BROKER_USER:-${KAFKA_SASL_USERNAME:-}}
+      BROKER_PASSWORD: ${BROKER_PASSWORD:-${KAFKA_SASL_PASSWORD:-}}
       MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-}
@@ -147,16 +150,18 @@ services:
     restart: unless-stopped
 
   sitl_messaging:
+    build:
+      context: .
+      dockerfile: components/sitl_messaging/docker/Dockerfile
     image: sitl-module-messaging:latest
     container_name: sitl-messaging
-    entrypoint: [""]
-    command: ["sh", "-c", "pip install --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -q -r requirements.txt 2>/dev/null; python -u -m components.sitl_messaging"]
-    volumes:
-      - .:/app
-    working_dir: /app
     environment:
-      BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
-      KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
+      BROKER_BACKEND: ${BROKER_TYPE:-${BROKER_BACKEND:-kafka}}
+      BROKER_TYPE: ${BROKER_TYPE:-${BROKER_BACKEND:-kafka}}
+      KAFKA_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-${KAFKA_SERVERS:-kafka:29092}}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-${KAFKA_SERVERS:-kafka:29092}}
+      BROKER_USER: ${BROKER_USER:-${KAFKA_SASL_USERNAME:-}}
+      BROKER_PASSWORD: ${BROKER_PASSWORD:-${KAFKA_SASL_PASSWORD:-}}
       MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-}
@@ -170,6 +175,45 @@ services:
       INFOPANEL_API_KEY: ${INFOPANEL_API_KEY:-your-api-key-here}
       INFOPANEL_SERVICE: ${INFOPANEL_SERVICE:-SITL}
       INFOPANEL_SERVICE_ID: ${INFOPANEL_SERVICE_ID:-5}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - |
+          python - <<'PY'
+          import os
+          import redis
+
+          from broker.src.bus_factory import create_system_bus
+
+          drone_id = "healthcheck_drone"
+          redis_url = os.getenv("REDIS_URL", "redis://redis:6379")
+          topic = os.getenv("POSITION_REQUEST_TOPIC", "sitl.telemetry.request")
+          client = redis.Redis.from_url(redis_url, decode_responses=True)
+          client.hset(
+              f"drone:{drone_id}:state",
+              mapping={"lat": "59.9386", "lon": "30.3141", "alt": "120.0", "status": "ARMED"},
+          )
+          client.expire(f"drone:{drone_id}:state", 60)
+
+          bus = create_system_bus(client_id="sitl-messaging-healthcheck")
+          bus.start()
+          try:
+              response = bus.request(
+                  topic,
+                  {"action": "request_position", "drone_id": drone_id},
+                  timeout=5,
+              )
+          finally:
+              bus.stop()
+
+          payload = (response or {}).get("payload", {})
+          if payload.get("lat") != 59.9386:
+              raise SystemExit(f"unexpected response: {response}")
+          PY
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
 networks:
