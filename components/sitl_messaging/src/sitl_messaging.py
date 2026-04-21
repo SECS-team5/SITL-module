@@ -119,6 +119,7 @@ class SitlMessagingComponent(BaseAsyncComponent):
         # Вывод полной информации о дроне в консоль
         self._print_drone_info(drone_id, state, response)
 
+        # Публикуем ответ в response топик через SDK
         response_message = create_response(
             correlation_id=self._get_transport_value(message, payload, "correlation_id"),
             payload=response,
@@ -131,7 +132,6 @@ class SitlMessagingComponent(BaseAsyncComponent):
             or self._response_topic
         )
         self.bus.publish(response_topic, response_message)
-        message["_response_sent"] = True
 
         self._infopanel.log_event(
             f"Returned position for drone_id={drone_id}", "info"

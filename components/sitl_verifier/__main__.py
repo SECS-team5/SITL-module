@@ -15,7 +15,8 @@ if project_root not in sys.path:
 
 def main():
     """Запуск SITL Verifier с брокером."""
-    from broker.bus_factory import create_system_bus
+    from broker.src.system_bus import SystemBus
+    from broker.src.bus_factory import create_system_bus
     from components.sitl_verifier.src.sitl_verifier import SitlVerifierComponent
 
     # Маппинг BROKER_BACKEND → BROKER_TYPE

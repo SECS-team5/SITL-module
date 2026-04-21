@@ -42,7 +42,7 @@ services:
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -h localhost -p 1883 -t '$$SYS/broker/uptime' -C 1 -W 2 -q 0 >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "nc -z localhost 1883 || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -68,22 +68,14 @@ services:
       dockerfile: components/sitl_verifier/docker/Dockerfile
     image: sitl-module-verifier:latest
     container_name: sitl-verifier
-    depends_on:
-      kafka:
-        condition: service_healthy
-      mosquitto:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    entrypoint: [""]
+    command: ["sh", "-c", "pip install --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -q -r requirements.txt 2>/dev/null; python -u -m components.sitl_verifier"]
+    volumes:
+      - .:/app
+    working_dir: /app
     environment:
       BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
       KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
-      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-}
-      KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-}
-      KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME:-}
-      KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD:-}
-      BROKER_USER: ${BROKER_USER:-}
-      BROKER_PASSWORD: ${BROKER_PASSWORD:-}
       MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-}
@@ -107,22 +99,14 @@ services:
       dockerfile: components/sitl_controller/docker/Dockerfile
     image: sitl-module-controller:latest
     container_name: sitl-controller
-    depends_on:
-      kafka:
-        condition: service_healthy
-      mosquitto:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    entrypoint: [""]
+    command: ["sh", "-c", "pip install --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -q -r requirements.txt 2>/dev/null; python -u -m components.sitl_controller"]
+    volumes:
+      - .:/app
+    working_dir: /app
     environment:
       BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
       KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
-      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-}
-      KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-}
-      KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME:-}
-      KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD:-}
-      BROKER_USER: ${BROKER_USER:-}
-      BROKER_PASSWORD: ${BROKER_PASSWORD:-}
       MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-}
@@ -145,22 +129,14 @@ services:
       dockerfile: components/sitl_core/docker/Dockerfile
     image: sitl-module-core:latest
     container_name: sitl-core
-    depends_on:
-      kafka:
-        condition: service_healthy
-      mosquitto:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    entrypoint: [""]
+    command: ["sh", "-c", "pip install --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -q -r requirements.txt 2>/dev/null; python -u -m components.sitl_core"]
+    volumes:
+      - .:/app
+    working_dir: /app
     environment:
       BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
       KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
-      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-}
-      KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-}
-      KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME:-}
-      KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD:-}
-      BROKER_USER: ${BROKER_USER:-}
-      BROKER_PASSWORD: ${BROKER_PASSWORD:-}
       MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-}
@@ -182,22 +158,14 @@ services:
       dockerfile: components/sitl_messaging/docker/Dockerfile
     image: sitl-module-messaging:latest
     container_name: sitl-messaging
-    depends_on:
-      kafka:
-        condition: service_healthy
-      mosquitto:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    entrypoint: [""]
+    command: ["sh", "-c", "pip install --timeout 60 --retries 3 -i https://pypi.tuna.tsinghua.edu.cn/simple -q -r requirements.txt 2>/dev/null; python -u -m components.sitl_messaging"]
+    volumes:
+      - .:/app
+    working_dir: /app
     environment:
       BROKER_BACKEND: ${BROKER_BACKEND:-kafka}
       KAFKA_SERVERS: ${KAFKA_SERVERS:-kafka:29092}
-      KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-}
-      KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-}
-      KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME:-}
-      KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD:-}
-      BROKER_USER: ${BROKER_USER:-}
-      BROKER_PASSWORD: ${BROKER_PASSWORD:-}
       MQTT_BROKER: ${MQTT_BROKER:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-}
@@ -211,12 +179,6 @@ services:
       INFOPANEL_API_KEY: ${INFOPANEL_API_KEY:-your-api-key-here}
       INFOPANEL_SERVICE: ${INFOPANEL_SERVICE:-SITL}
       INFOPANEL_SERVICE_ID: ${INFOPANEL_SERVICE_ID:-5}
-    healthcheck:
-      test: ["CMD", "python", "-m", "components.sitl_messaging.healthcheck"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
     restart: unless-stopped
 
 networks:

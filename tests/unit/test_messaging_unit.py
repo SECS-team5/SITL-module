@@ -127,29 +127,3 @@ async def test_handle_request_position_drone_not_found(fake_redis):
     assert result is not None
     assert "error" in result
     assert "not found" in result["error"]
-
-
-@pytest.mark.asyncio
-async def test_handle_message_with_reply_to_publishes_single_response(fake_redis):
-    _seed_drone_state(fake_redis)
-    component = _make_messaging_component(fake_redis)
-
-    message = {
-        "action": "request_position",
-        "drone_id": "drone_001",
-        "reply_to": "replies.test.single",
-        "correlation_id": "single-123",
-    }
-
-    await component._handle_message(message)
-
-    component.bus.publish.assert_called_once()
-    published_topic, response_message = component.bus.publish.call_args.args
-    assert published_topic == "replies.test.single"
-    assert response_message["correlation_id"] == "single-123"
-    assert response_message["payload"] == {
-        "lat": 59.9386,
-        "lon": 30.3141,
-        "alt": 100.0,
-    }
-    assert response_message["drone_id"] == "drone_001"

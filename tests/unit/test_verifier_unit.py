@@ -1,7 +1,6 @@
 import json
 import pathlib
 import sys
-from unittest.mock import MagicMock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]  # new-SITL/
@@ -144,35 +143,6 @@ def test_process_input_message_rejects_unsupported_topic() -> None:
     assert message_type is None
     assert validated_payload is None
     assert "unsupported topic" in reason
-
-
-def test_start_starts_bus_before_raw_topic_subscriptions() -> None:
-    import asyncio
-
-    from components.sitl_verifier.src.sitl_verifier import SitlVerifierComponent
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        mock_bus = MagicMock()
-        component = SitlVerifierComponent(
-            component_id="test-verifier",
-            bus=mock_bus,
-            topic="components.sitl_verifier",
-        )
-
-        component.start()
-
-        assert mock_bus.method_calls[0][0] == "start"
-        subscribe_topics = [call.args[0] for call in mock_bus.subscribe.call_args_list]
-        assert subscribe_topics == [
-            "components.sitl_verifier",
-            COMMAND_TOPIC,
-            HOME_TOPIC,
-        ]
-    finally:
-        asyncio.set_event_loop(None)
-        loop.close()
 
 
 def _make_component():

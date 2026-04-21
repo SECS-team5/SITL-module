@@ -21,7 +21,7 @@ if str(ROOT) not in sys.path:
 
 import redis.asyncio as redis
 
-from broker.bus_factory import create_system_bus
+from broker.src.bus_factory import create_system_bus
 from shared import state
 from shared.contracts import (
     COMMAND_SCHEMA_NAME,

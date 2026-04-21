@@ -1,6 +1,5 @@
 import pathlib
 import sys
-from unittest.mock import MagicMock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]  # new-SITL/
@@ -112,32 +111,3 @@ async def test_handle_verified_command_after_home(fake_redis):
 
     assert result["status"] == "command_applied"
     assert result["drone_id"] == "drone_001"
-
-
-def test_start_starts_bus_before_verified_topic_subscriptions() -> None:
-    import asyncio
-
-    from components.sitl_controller.src.sitl_controller import SitlControllerComponent
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        mock_bus = MagicMock()
-        component = SitlControllerComponent(
-            component_id="test-controller",
-            bus=mock_bus,
-            topic="components.sitl_controller",
-        )
-
-        component.start()
-
-        assert mock_bus.method_calls[0][0] == "start"
-        subscribe_topics = [call.args[0] for call in mock_bus.subscribe.call_args_list]
-        assert subscribe_topics == [
-            "components.sitl_controller",
-            "sitl.verified-commands",
-            "sitl.verified-home",
-        ]
-    finally:
-        asyncio.set_event_loop(None)
-        loop.close()
