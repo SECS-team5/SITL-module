@@ -1,14 +1,24 @@
+# tests/unit/test_core_unit.py
 import pathlib
 import sys
+import asyncio
+import pytest
+from unittest.mock import MagicMock, AsyncMock, patch
 
+# 🛡 ГЛОБАЛЬНЫЙ МОК ИНФОПАНЕЛИ
+# Должен быть ДО импорта любых компонентов, чтобы переопределить фабрику на этапе инициализации
+_mock_infopanel = MagicMock()
+patch(
+    "shared.infopanel_client.create_infopanel_client_from_env",
+    return_value=_mock_infopanel,
+).start()
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]  # new-SITL/
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import pytest
-
 from shared import state  # noqa: E402
+from components.sitl_core.src.sitl_core import SitlCoreComponent  # noqa: E402
 
 
 @pytest.fixture
@@ -85,17 +95,12 @@ def test_advance_drone_state_updates_position():
     }
     original_lat = moving_state["lat"]
     original_lon = moving_state["lon"]
-    
     next_state = state.advance_drone_state(moving_state, 1.0)
     assert next_state["lat"] != original_lat or next_state["lon"] != original_lon
 
 
 @pytest.mark.asyncio
 async def test_core_position_updater(fake_redis):
-    from unittest.mock import MagicMock, AsyncMock, patch
-    from components.sitl_core.src.sitl_core import SitlCoreComponent
-
-    # Заполняем Redis тестовыми данными
     drone_state = {
         "status": "MOVING",
         "lat": 59.9386,
@@ -108,10 +113,9 @@ async def test_core_position_updater(fake_redis):
         "home_lon": 30.3141,
         "home_alt": 100.0,
     }
-    # Сохраняем исходные значения
     original_lat = drone_state["lat"]
     original_lon = drone_state["lon"]
-    
+
     fake_redis.hashes["drone:test:state"] = drone_state.copy()
 
     mock_bus = MagicMock()
@@ -121,11 +125,60 @@ async def test_core_position_updater(fake_redis):
             bus=mock_bus,
             topic="components.sitl_core",
         )
-        component._update_hz = 1.0  # 1 обновление в секунду
+        component._update_hz = 1.0
 
-        # Выполняем одно обновление
         await component._update_drone_position(fake_redis, "drone:test:state", 1.0)
 
-        # Проверяем что позиция обновилась
         updated = await fake_redis.hgetall("drone:test:state")
         assert updated["lat"] != original_lat or updated["lon"] != original_lon
+
+
+def test_core_start_registers_and_logs(monkeypatch):
+    mock_bus = MagicMock()
+    with patch.object(SitlCoreComponent, '_register_handlers', return_value=None):
+        comp = SitlCoreComponent("c1", mock_bus)
+        comp._infopanel = MagicMock()
+        comp._update_hz = 10.0
+        # Отключаем создание задачи, так как в sync-тесте нет event loop
+        monkeypatch.setattr(comp, 'add_background_task', lambda t: None)
+        comp.start()
+        comp._infopanel.log_event.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_core_handle_get_config():
+    mock_bus = MagicMock()
+    comp = SitlCoreComponent("c1", mock_bus)
+    comp._redis_url = "r"
+    comp._update_hz = 5.0
+    comp._state_ttl_sec = 100
+    cfg = await comp._handle_get_config(None)
+    assert cfg["redis_url"] == "r"
+
+
+@pytest.mark.asyncio
+async def test_core_get_redis_caching(fake_redis):
+    mock_bus = MagicMock()
+    comp = SitlCoreComponent("c1", mock_bus)
+    comp._redis = fake_redis
+    assert await comp._get_redis() is fake_redis
+
+
+@pytest.mark.asyncio
+async def test_core_update_drone_non_moving_and_ttl_zero(fake_redis):
+    mock_bus = MagicMock()
+    comp = SitlCoreComponent("c1", mock_bus)
+    comp._state_ttl_sec = 0  # TTL=0 ветка
+
+    fake_redis.hashes["d:x:state"] = {"status": "ARMED"}
+    res = await comp._update_drone_position(fake_redis, "d:x:state", 1.0)
+    assert res is False
+
+    fake_redis.hashes["d:x:state"] = {
+        "status": "MOVING", "lat": "1", "lon": "2", "alt": "3",
+        "vx": "0", "vy": "0", "vz": "0",
+        "home_lat": "0", "home_lon": "0", "home_alt": "0"
+    }
+    res = await comp._update_drone_position(fake_redis, "d:x:state", 1.0)
+    assert res is True
+
