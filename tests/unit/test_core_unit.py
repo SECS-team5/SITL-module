@@ -133,6 +133,44 @@ async def test_core_position_updater(fake_redis):
         assert updated["lat"] != original_lat or updated["lon"] != original_lon
 
 
+@pytest.mark.asyncio
+async def test_core_stops_drone_on_geofence_violation(fake_redis):
+    fake_redis.hashes["drone:test:state"] = {
+        "status": "MOVING",
+        "lat": 59.9386,
+        "lon": 30.3141,
+        "alt": 100.0,
+        "vx": 50.0,
+        "vy": 0.0,
+        "vz": 0.0,
+        "home_lat": 59.9386,
+        "home_lon": 30.3141,
+        "home_alt": 100.0,
+    }
+
+    mock_bus = MagicMock()
+    component = SitlCoreComponent(
+        component_id="test-core",
+        bus=mock_bus,
+        topic="components.sitl_core",
+    )
+    component._geofence_radius_m = 1.0
+    component._infopanel = MagicMock()
+
+    result = await component._update_drone_position(
+        fake_redis,
+        "drone:test:state",
+        1.0,
+    )
+    updated = await fake_redis.hgetall("drone:test:state")
+
+    assert result is True
+    assert updated["status"] == "ARMED"
+    assert updated["vx"] == 0.0
+    assert updated["policy_violation"] == state.GEOFENCE_VIOLATION_REASON
+    component._infopanel.log_event.assert_called()
+
+
 def test_core_start_registers_and_logs(monkeypatch):
     mock_bus = MagicMock()
     with patch.object(SitlCoreComponent, '_register_handlers', return_value=None):
@@ -154,6 +192,8 @@ async def test_core_handle_get_config():
     comp._state_ttl_sec = 100
     cfg = await comp._handle_get_config(None)
     assert cfg["redis_url"] == "r"
+    assert "geofence_radius_m" in cfg
+    assert "scan_count" in cfg
 
 
 @pytest.mark.asyncio

@@ -38,7 +38,7 @@ class FakeRedis:
         matched_keys = [key for key in self.values if fnmatch.fnmatch(key, match)]
         return 0, matched_keys
 
-    async def scan_iter(self, match: str):
+    async def scan_iter(self, match: str, count: int | None = None):
         for key in list(self.hashes):
             if fnmatch.fnmatch(key, match):
                 yield key

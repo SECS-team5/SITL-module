@@ -29,6 +29,9 @@ from shared.state import (
     state_has_home,
 )
 
+COMMAND_STRATEGY_ARMED = "ARMED"
+COMMAND_STRATEGY_HOME_MISSING = "HOME_MISSING"
+
 
 class SitlControllerComponent(BaseAsyncComponent):
     """Компонент для обработки верифицированных команд дронов."""
@@ -115,6 +118,12 @@ class SitlControllerComponent(BaseAsyncComponent):
             print(f"[DRONE STATE] Домашняя локация: НЕ УСТАНОВЛЕНА")
         print("="*80 + "\n")
 
+    @staticmethod
+    def _select_command_strategy(state: Dict[str, Any]) -> str:
+        if not state or not state_has_home(state):
+            return COMMAND_STRATEGY_HOME_MISSING
+        return str(state.get("status") or "")
+
     async def _handle_verified_message(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Обработка верифицированного сообщения."""
         payload = message.get("payload", message)
@@ -167,12 +176,25 @@ class SitlControllerComponent(BaseAsyncComponent):
             self._print_drone_state(drone_id, next_state, "HOME УСТАНОВЛЕН")
             return {"status": "home_stored", "drone_id": drone_id}
 
-        if not existing_state or not state_has_home(existing_state):
+        strategy = self._select_command_strategy(existing_state)
+        if strategy == COMMAND_STRATEGY_HOME_MISSING:
             self._infopanel.log_event(
                 f"Ignored COMMAND for drone_id={drone_id}: HOME state is missing",
                 "warning",
             )
             return {"status": "ignored", "reason": "HOME state missing"}
+
+        if strategy != COMMAND_STRATEGY_ARMED:
+            self._infopanel.log_event(
+                f"Ignored COMMAND for drone_id={drone_id}: current status is {strategy}, "
+                "ARMED is required",
+                "warning",
+            )
+            return {
+                "status": "ignored",
+                "reason": "drone not in ARMED state",
+                "current_status": strategy,
+            }
 
         next_state = apply_command_update(existing_state, payload)
         await self._persist_state(r, drone_id, next_state)

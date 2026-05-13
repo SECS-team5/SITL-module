@@ -25,6 +25,8 @@ NUMERIC_STATE_FIELDS = frozenset(
 )
 HORIZONTAL_MOVING_THRESHOLD_SQUARED = 0.01
 VERTICAL_MOVING_THRESHOLD = 0.01
+EARTH_RADIUS_M = 6371000.0
+GEOFENCE_VIOLATION_REASON = "GEOFENCE_LIMIT"
 
 
 def utc_now_iso() -> str:
@@ -68,6 +70,74 @@ def compute_speed_metrics(vx: float, vy: float, vz: float) -> tuple[float, float
 
 def is_moving_command(vx: float, vy: float, vz: float) -> bool:
     return (vx * vx + vy * vy) > HORIZONTAL_MOVING_THRESHOLD_SQUARED or abs(vz) > VERTICAL_MOVING_THRESHOLD
+
+
+def distance_meters(
+    lat_a: float,
+    lon_a: float,
+    lat_b: float,
+    lon_b: float,
+) -> float:
+    lat_a_rad = math.radians(lat_a)
+    lon_a_rad = math.radians(lon_a)
+    lat_b_rad = math.radians(lat_b)
+    lon_b_rad = math.radians(lon_b)
+
+    delta_lat = lat_b_rad - lat_a_rad
+    delta_lon = lon_b_rad - lon_a_rad
+    haversine = (
+        math.sin(delta_lat / 2.0) ** 2
+        + math.cos(lat_a_rad)
+        * math.cos(lat_b_rad)
+        * math.sin(delta_lon / 2.0) ** 2
+    )
+    return 2.0 * EARTH_RADIUS_M * math.asin(min(1.0, math.sqrt(haversine)))
+
+
+def distance_from_home_meters(state: Mapping[str, Any]) -> float | None:
+    required_fields = ("lat", "lon", "home_lat", "home_lon")
+    if not all(field in state for field in required_fields):
+        return None
+
+    return distance_meters(
+        float(state["home_lat"]),
+        float(state["home_lon"]),
+        float(state["lat"]),
+        float(state["lon"]),
+    )
+
+
+def is_within_home_geofence(
+    state: Mapping[str, Any],
+    geofence_radius_m: float,
+) -> bool:
+    distance = distance_from_home_meters(state)
+    if distance is None:
+        return False
+
+    return distance <= geofence_radius_m
+
+
+def stop_drone_state(
+    state: Mapping[str, Any],
+    reason: str | None = None,
+) -> dict[str, Any]:
+    next_state = dict(state)
+    next_state.update(
+        {
+            "status": "ARMED",
+            "vx": 0.0,
+            "vy": 0.0,
+            "vz": 0.0,
+            "speed_h_ms": 0.0,
+            "speed_v_ms": 0.0,
+            "last_update": utc_now_iso(),
+        }
+    )
+    if reason:
+        next_state["policy_violation"] = reason
+        next_state["policy_violation_at"] = utc_now_iso()
+    return next_state
 
 
 def build_home_state(
@@ -127,6 +197,7 @@ def apply_command_update(
 def advance_drone_state(
     state: Mapping[str, Any],
     delta_time_sec: float,
+    geofence_radius_m: float | None = None,
 ) -> dict[str, Any]:
     current_state = dict(state)
     if current_state.get("status") != "MOVING":
@@ -148,6 +219,12 @@ def advance_drone_state(
     next_state["lon"] = round(lon + (vx * delta_time_sec) / meters_per_degree_lon, 7)
     next_state["alt"] = round(alt + (vz * delta_time_sec), 3)
     next_state["last_update"] = utc_now_iso()
+
+    if geofence_radius_m is not None and not is_within_home_geofence(
+        next_state, geofence_radius_m
+    ):
+        return stop_drone_state(current_state, GEOFENCE_VIOLATION_REASON)
+
     return next_state
 
 

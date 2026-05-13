@@ -107,6 +107,78 @@ async def test_handle_verified_command_after_home(fake_redis):
     assert result["drone_id"] == "drone_001"
 
 
+@pytest.mark.asyncio
+async def test_handle_verified_command_while_moving_is_ignored(fake_redis):
+    component = _make_component(fake_redis)
+    drone_key = state.get_drone_state_key("drone_001")
+    fake_redis.hashes[drone_key] = {
+        "status": "MOVING",
+        "lat": 59.9386,
+        "lon": 30.3141,
+        "alt": 100.0,
+        "home_lat": 59.9386,
+        "home_lon": 30.3141,
+        "home_alt": 100.0,
+        "vx": 1.0,
+        "vy": 0.0,
+        "vz": 0.0,
+        "mag_heading": 90.0,
+    }
+
+    command_message = {
+        "payload": {
+            "drone_id": "drone_001",
+            "vx": 3.5,
+            "vy": -1.0,
+            "vz": 0.5,
+            "mag_heading": 95.0,
+        },
+        "message_type": "COMMAND",
+    }
+    result = await component._handle_verified_message(command_message)
+    stored = await fake_redis.hgetall(drone_key)
+
+    assert result["status"] == "ignored"
+    assert result["current_status"] == "MOVING"
+    assert stored["vx"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_home_resets_moving_state_to_armed(fake_redis):
+    component = _make_component(fake_redis)
+    drone_key = state.get_drone_state_key("drone_001")
+    fake_redis.hashes[drone_key] = {
+        "status": "MOVING",
+        "lat": 59.0,
+        "lon": 30.0,
+        "alt": 90.0,
+        "home_lat": 59.0,
+        "home_lon": 30.0,
+        "home_alt": 90.0,
+        "vx": 10.0,
+        "vy": 0.0,
+        "vz": 0.0,
+        "mag_heading": 45.0,
+    }
+
+    result = await component._handle_verified_message(
+        {
+            "payload": {
+                "drone_id": "drone_001",
+                "home_lat": 59.9386,
+                "home_lon": 30.3141,
+                "home_alt": 100.0,
+            },
+            "message_type": "HOME",
+        }
+    )
+    stored = await fake_redis.hgetall(drone_key)
+
+    assert result["status"] == "home_stored"
+    assert stored["status"] == "ARMED"
+    assert stored["vx"] == 0.0
+
+
 def test_controller_log_callback_error():
     mock_bus = MagicMock()
     comp = SitlControllerComponent("c1", mock_bus)
