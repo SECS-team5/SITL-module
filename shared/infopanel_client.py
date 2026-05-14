@@ -2,8 +2,9 @@ import asyncio
 import os
 import time
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor
 
-import aiohttp
+import requests
 
 DEFAULT_INFOPANEL_URL = "https://infopanel.csse.ru/api"
 DEFAULT_SERVICE = "SITL"
@@ -34,7 +35,8 @@ class InfopanelClient:
         self._batch_size = batch_size
         self._flush_interval = flush_interval
         self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-        self._session: aiohttp.ClientSession | None = None
+        self._session: requests.Session | None = None
+        self._executor: ThreadPoolExecutor | None = None
         self._worker_task: asyncio.Task | None = None
         self._stopped = False
 
@@ -42,7 +44,9 @@ class InfopanelClient:
         """Запустить фоновую отправку логов"""
         if self._worker_task is not None:
             return
-        self._session = aiohttp.ClientSession()
+        self._session = requests.Session()
+        self._session.headers.update({"X-API-Key": self._api_key})
+        self._executor = ThreadPoolExecutor(max_workers=1)
         self._worker_task = asyncio.create_task(self._worker())
 
     async def stop(self) -> None:
@@ -55,8 +59,10 @@ class InfopanelClient:
                 await self._worker_task
             except asyncio.CancelledError:
                 pass
+        if self._executor:
+            self._executor.shutdown(wait=True)
         if self._session:
-            await self._session.close()
+            self._session.close()
 
     def log_event(
             self,
@@ -119,17 +125,17 @@ class InfopanelClient:
     async def _send_batch(self, batch: list[dict[str, Any]]) -> None:
         """Отправить батч логов в инфопанель"""
         try:
-            async with self._session.post(
-                    f"{self._base_url}/log/event",
-                    json=batch,
-                    headers={"X-API-Key": self._api_key},
-                    timeout=aiohttp.ClientTimeout(total=10.0),
-            ) as resp:
-                resp.raise_for_status()
+            # Выполняем синхронный HTTP-запрос в отдельном потоке
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                self._executor,
+                self._send_batch_sync,
+                batch
+            )
 
-                # Помечаем все элементы батча как обработанные
-                for _ in batch:
-                    self._queue.task_done()
+            # Помечаем все элементы батча как обработанные
+            for _ in batch:
+                self._queue.task_done()
 
         except Exception as exc:
             # Fallback: выводим ошибку в stderr
@@ -138,6 +144,15 @@ class InfopanelClient:
             # Всё равно помечаем как обработанные, чтобы не зависнуть
             for _ in batch:
                 self._queue.task_done()
+
+    def _send_batch_sync(self, batch: list[dict[str, Any]]) -> None:
+        """Синхронная отправка батча (выполняется в отдельном потоке)"""
+        response = self._session.post(
+            f"{self._base_url}/log/event",
+            json=batch,
+            timeout=10.0,
+        )
+        response.raise_for_status()
 
 
 def create_infopanel_client_from_env(env: dict[str, str] | None = None) -> InfopanelClient:
