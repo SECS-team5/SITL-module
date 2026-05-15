@@ -2,10 +2,12 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-COPY requirements.txt ./requirements.txt
+COPY systems/SITL-module/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --timeout 60 --retries 3 -r requirements.txt
 
-COPY . .
+COPY broker/ ./broker/          
+COPY sdk/ ./sdk/                
+COPY systems/SITL-module/ ./  
 
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1

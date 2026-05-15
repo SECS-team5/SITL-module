@@ -64,8 +64,8 @@ services:
 
   sitl_verifier:
     build:
-      context: .
-      dockerfile: components/sitl_verifier/docker/Dockerfile
+      context: ../..
+      dockerfile: systems/SITL-module/components/sitl_verifier/docker/Dockerfile
     image: sitl-module-verifier:latest
     container_name: sitl-verifier
     environment:
@@ -94,8 +94,8 @@ services:
 
   sitl_controller:
     build:
-      context: .
-      dockerfile: components/sitl_controller/docker/Dockerfile
+      context: ../..
+      dockerfile: systems/SITL-module/components/sitl_controller/docker/Dockerfile
     image: sitl-module-controller:latest
     container_name: sitl-controller
     environment:
@@ -123,8 +123,8 @@ services:
 
   sitl_core:
     build:
-      context: .
-      dockerfile: components/sitl_core/docker/Dockerfile
+      context: ../..
+      dockerfile: systems/SITL-module/components/sitl_core/docker/Dockerfile
     image: sitl-module-core:latest
     container_name: sitl-core
     environment:
@@ -151,8 +151,8 @@ services:
 
   sitl_messaging:
     build:
-      context: .
-      dockerfile: components/sitl_messaging/docker/Dockerfile
+      context: ../..
+      dockerfile: systems/SITL-module/components/sitl_messaging/docker/Dockerfile
     image: sitl-module-messaging:latest
     container_name: sitl-messaging
     environment:
