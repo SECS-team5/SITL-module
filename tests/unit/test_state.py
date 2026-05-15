@@ -23,3 +23,37 @@ def test_build_position_response_schema_fail(monkeypatch):
     monkeypatch.setattr("shared.state.validate_schema", lambda p, s: (False, "fail"))
     state_data = {"lat": 1.0, "lon": 2.0, "alt": 3.0}
     assert state.build_position_response(state_data) is None
+
+
+def test_distance_from_home_and_geofence():
+    state_data = {
+        "lat": 59.9386,
+        "lon": 30.3141,
+        "home_lat": 59.9386,
+        "home_lon": 30.3141,
+    }
+    assert state.distance_from_home_meters(state_data) == pytest.approx(0.0)
+    assert state.is_within_home_geofence(state_data, 1.0) is True
+
+
+def test_advance_drone_state_stops_on_geofence_violation():
+    moving_state = {
+        "status": "MOVING",
+        "lat": 59.9386,
+        "lon": 30.3141,
+        "alt": 100.0,
+        "home_lat": 59.9386,
+        "home_lon": 30.3141,
+        "home_alt": 100.0,
+        "vx": 50.0,
+        "vy": 0.0,
+        "vz": 0.0,
+    }
+    next_state = state.advance_drone_state(
+        moving_state,
+        1.0,
+        geofence_radius_m=1.0,
+    )
+    assert next_state["status"] == "ARMED"
+    assert next_state["vx"] == 0.0
+    assert next_state["policy_violation"] == state.GEOFENCE_VIOLATION_REASON

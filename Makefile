@@ -52,7 +52,7 @@ logs:
 unit-test:
 	@echo "=== Running unit tests ==="
 	docker compose run --rm --no-deps --entrypoint "" sitl_verifier sh -c \
-		"pip install -q kafka-python aiohttp pytest pytest-asyncio paho-mqtt && python -m pytest tests/unit/ -v"
+		"pip install -q kafka-python aiohttp pytest pytest-asyncio paho-mqtt requests && python -m pytest tests/unit/ -v"
 
 integration-test: integration-test-mqtt
 

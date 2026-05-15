@@ -4,8 +4,7 @@ import asyncio
 import pytest
 from unittest.mock import MagicMock, patch
 
-# 🛡 ГЛОБАЛЬНЫЙ МОК ИНФОПАНЕЛИ
-# Должен быть ДО импорта любых компонентов, чтобы переопределить фабрику на этапе инициализации
+# 🛡 ГЛОБАЛЬНЫЙ МОК ИНФОПАНЕЛИ — ДОЛЖЕН БЫТЬ ДО ИМПОРТА КОМПОНЕНТОВ
 _mock_infopanel = MagicMock()
 patch(
     "shared.infopanel_client.create_infopanel_client_from_env",
@@ -35,15 +34,27 @@ def _seed_drone_state(fake_redis, drone_id="drone_001"):
 
 
 def _make_messaging_component(fake_redis):
-    """Создаёт компонент messaging с fake Redis."""
-    from components.sitl_messaging.src.sitl_messaging import SitlMessagingComponent
+    """
+    Создаёт компонент messaging с fake Redis и ИНИЦИАЛИЗИРОВАННЫМ TelemetryProxy.
+    ⚠️ Ключевое исправление: вручную создаём _telemetry_proxy, т.к. _get_redis() не вызывается в тестах.
+    """
+    from components.sitl_messaging.src.sitl_messaging import SitlMessagingComponent, TelemetryProxy
+    
     mock_bus = MagicMock()
     component = SitlMessagingComponent(
         component_id="test-messaging",
         bus=mock_bus,
         topic="components.sitl_messaging",
     )
+    # Устанавливаем Redis напрямую (как в тестах)
     component._redis = fake_redis
+    # ⚠️ ВАЖНО: вручную инициализируем TelemetryProxy
+    component._telemetry_proxy = TelemetryProxy(
+        redis_client=fake_redis,
+        response_topic=component._response_topic,
+        infopanel_client=component._infopanel,
+        component_id=component.component_id,
+    )
     return component
 
 
@@ -65,7 +76,7 @@ async def test_handle_request_position_returns_coordinates(fake_redis):
     assert "lon" in result
     assert "alt" in result
     assert result["lat"] == 59.9386
-    
+
     component.bus.publish.assert_called_once()
     published_topic, response_message = component.bus.publish.call_args.args
     assert published_topic == component._response_topic
@@ -78,6 +89,7 @@ async def test_handle_request_position_returns_coordinates(fake_redis):
 async def test_handle_request_position_uses_reply_to_from_payload(fake_redis):
     _seed_drone_state(fake_redis)
     component = _make_messaging_component(fake_redis)
+    
     message = {
         "payload": {
             "drone_id": "drone_001",
@@ -86,7 +98,7 @@ async def test_handle_request_position_uses_reply_to_from_payload(fake_redis):
         }
     }
     result = await component._handle_request_position(message)
-
+    
     assert result is not None
     component.bus.publish.assert_called_once()
     published_topic, response_message = component.bus.publish.call_args.args
@@ -101,10 +113,10 @@ async def test_handle_request_position_drone_not_found(fake_redis):
     component = _make_messaging_component(fake_redis)
     message = {"payload": {"drone_id": "drone_999"}, "correlation_id": "test-123"}
     result = await component._handle_request_position(message)
-
+    
     assert result is not None
     assert "error" in result
-    assert "not found" in result["error"]
+    assert "not found" in result["error"].lower()
 
 
 def test_messaging_start():
@@ -118,7 +130,8 @@ def test_messaging_start():
 @pytest.mark.asyncio
 async def test_handle_request_schema_fail(fake_redis):
     mock_bus = MagicMock()
-    with patch.object(contracts, "validate_schema", return_value=(False, "bad")):
+    with patch.object(contracts, "validate_schema", return_value=(False, "bad schema")):
         comp = _make_messaging_component(fake_redis)
         res = await comp._handle_request_position({"payload": {}})
         assert "error" in res
+        assert res["error"] == "invalid request structure"

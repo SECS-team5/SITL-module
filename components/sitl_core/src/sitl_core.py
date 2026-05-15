@@ -13,7 +13,12 @@ from sdk.base_async_component import BaseAsyncComponent
 from broker.system_bus import SystemBus
 
 from shared.infopanel_client import create_infopanel_client_from_env
-from shared.state import advance_drone_state, normalize_state, serialize_state
+from shared.state import (
+    GEOFENCE_VIOLATION_REASON,
+    advance_drone_state,
+    normalize_state,
+    serialize_state,
+)
 
 
 class SitlCoreComponent(BaseAsyncComponent):
@@ -29,6 +34,8 @@ class SitlCoreComponent(BaseAsyncComponent):
         self._redis_url = os.getenv("REDIS_URL", "redis://redis:6379")
         self._update_hz = float(os.getenv("UPDATE_FREQUENCY_HZ", "10.0"))
         self._state_ttl_sec = int(os.getenv("STATE_TTL_SEC", "7200"))
+        self._geofence_radius_m = float(os.getenv("GEOFENCE_RADIUS_M", "1000.0"))
+        self._scan_count = int(os.getenv("REDIS_SCAN_COUNT", "100"))
         self._redis: Optional[redis.Redis] = None
         self._update_counter = {}  # Счетчик обновлений для каждого дрона
         self._log_every_n_updates = int(os.getenv("LOG_POSITION_EVERY_N", "10"))  # Логировать каждые N обновлений
@@ -52,6 +59,8 @@ class SitlCoreComponent(BaseAsyncComponent):
             "redis_url": self._redis_url,
             "update_hz": self._update_hz,
             "state_ttl_sec": self._state_ttl_sec,
+            "geofence_radius_m": self._geofence_radius_m,
+            "scan_count": self._scan_count,
         }
 
     def start(self):
@@ -69,7 +78,10 @@ class SitlCoreComponent(BaseAsyncComponent):
         while self._running:
             try:
                 r = await self._get_redis()
-                async for state_key in r.scan_iter(match="drone:*:state"):
+                async for state_key in r.scan_iter(
+                    match="drone:*:state",
+                    count=self._scan_count,
+                ):
                     await self._update_drone_position(r, state_key, update_interval_sec)
                 await asyncio.sleep(update_interval_sec)
             except Exception as exc:
@@ -78,9 +90,15 @@ class SitlCoreComponent(BaseAsyncComponent):
 
     def _print_position_update(self, drone_id: str, state: Dict[str, Any]):
         """Вывод обновления позиции дрона в консоль."""
+        lat = float(state.get("lat", 0.0))
+        lon = float(state.get("lon", 0.0))
+        alt = float(state.get("alt", 0.0))
+        vx = float(state.get("vx", 0.0))
+        vy = float(state.get("vy", 0.0))
+        vz = float(state.get("vz", 0.0))
         print(f"\n[POSITION UPDATE] Дрон: {drone_id} | Статус: {state.get('status', 'N/A')} | "
-              f"Позиция: ({state.get('x', 'N/A'):.2f}, {state.get('y', 'N/A'):.2f}, {state.get('z', 'N/A'):.2f}) | "
-              f"Скорость: ({state.get('vx', 'N/A'):.2f}, {state.get('vy', 'N/A'):.2f}, {state.get('vz', 'N/A'):.2f})")
+              f"Позиция: ({lat:.7f}, {lon:.7f}, {alt:.2f}) | "
+              f"Скорость: ({vx:.2f}, {vy:.2f}, {vz:.2f})")
 
     async def _update_drone_position(
         self, r: redis.Redis, state_key: str, update_interval_sec: float
@@ -94,10 +112,21 @@ class SitlCoreComponent(BaseAsyncComponent):
         if state.get("status") != "MOVING":
             return False
 
-        next_state = advance_drone_state(state, update_interval_sec)
+        next_state = advance_drone_state(
+            state,
+            update_interval_sec,
+            geofence_radius_m=self._geofence_radius_m,
+        )
         await r.hset(state_key, mapping=serialize_state(next_state))
         if self._state_ttl_sec > 0:
             await r.expire(state_key, self._state_ttl_sec)
+
+        if next_state.get("policy_violation") == GEOFENCE_VIOLATION_REASON:
+            self._infopanel.log_event(
+                f"Stopped drone state_key={state_key}: geofence radius "
+                f"{self._geofence_radius_m:.1f}m exceeded",
+                "warning",
+            )
 
         # Периодический вывод обновлений позиции
         drone_id = state_key.split(":")[1]  # Извлекаем drone_id из ключа "drone:X:state"
