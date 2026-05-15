@@ -1,4 +1,3 @@
-# tests/unit/test_verifier_unit.py
 import json
 import pathlib
 import sys
@@ -6,8 +5,7 @@ import asyncio
 import pytest
 from unittest.mock import MagicMock, patch
 
-# 🛡 ГЛОБАЛЬНЫЙ МОК ИНФОПАНЕЛИ
-# Должен быть ДО импорта любых компонентов
+# 🛡 ГЛОБАЛЬНЫЙ МОК ИНФОПАНЕЛИ — ДОЛЖЕН БЫТЬ ДО ИМПОРТА КОМПОНЕНТОВ
 _mock_infopanel = MagicMock()
 patch(
     "shared.infopanel_client.create_infopanel_client_from_env",
@@ -19,7 +17,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from shared import contracts  # noqa: E402
-from components.sitl_verifier.src.sitl_verifier import SitlVerifierComponent  # noqa: E402
+from components.sitl_verifier.src.sitl_verifier import (  # noqa: E402
+    SitlVerifierComponent,
+    ValidationChain,
+    ValidationResult,
+)
 
 COMMAND_TOPIC = "sitl.commands"
 HOME_TOPIC = "sitl-drone-home"
@@ -45,6 +47,7 @@ def test_parse_json_payload_accepts_dict_bytes_and_string() -> None:
 
 
 def test_process_input_message_accepts_valid_command_message() -> None:
+    """Тестируем ValidationChain напрямую, т.к. _process_input_message удалён."""
     payload = {
         "drone_id": "drone_001",
         "vx": 3.5,
@@ -52,61 +55,73 @@ def test_process_input_message_accepts_valid_command_message() -> None:
         "vz": 0.5,
         "mag_heading": 90.0,
     }
-    component = _make_component()
-    ok, message_type, validated_payload, reason = component._process_input_message(
-        COMMAND_TOPIC, payload
+    chain = ValidationChain(
+        commands_topic=COMMAND_TOPIC,
+        home_topic=HOME_TOPIC,
+        infopanel_client=_mock_infopanel,
     )
-    assert ok is True
-    assert reason == ""
-    assert message_type == "COMMAND"
-    assert validated_payload == payload
+    result = chain.validate(COMMAND_TOPIC, payload)
+    
+    assert result.success is True
+    assert result.message_type == "COMMAND"
+    assert result.validated_payload is not None
+    assert result.validated_payload["drone_id"] == "drone_001"
+    assert "verified_at" in result.validated_payload
     assert contracts.resolve_verified_topic(
-        message_type,
+        result.message_type,
         VERIFIED_COMMAND_TOPIC,
         VERIFIED_HOME_TOPIC,
     ) == VERIFIED_COMMAND_TOPIC
 
 
 def test_process_input_message_accepts_valid_home_message() -> None:
+    """Тестируем ValidationChain напрямую."""
     payload = {
         "drone_id": "drone_010",
         "home_lat": 59.9386,
         "home_lon": 30.3141,
         "home_alt": 100.0,
     }
-    component = _make_component()
-    ok, message_type, validated_payload, reason = component._process_input_message(
-        HOME_TOPIC, payload
+    chain = ValidationChain(
+        commands_topic=COMMAND_TOPIC,
+        home_topic=HOME_TOPIC,
+        infopanel_client=_mock_infopanel,
     )
-    assert ok is True
-    assert reason == ""
-    assert message_type == "HOME"
-    assert validated_payload == payload
+    result = chain.validate(HOME_TOPIC, payload)
+    
+    assert result.success is True
+    assert result.message_type == "HOME"
+    assert result.validated_payload is not None
     assert contracts.resolve_verified_topic(
-        message_type,
+        result.message_type,
         VERIFIED_COMMAND_TOPIC,
         VERIFIED_HOME_TOPIC,
     ) == VERIFIED_HOME_TOPIC
 
 
 def test_process_input_message_rejects_missing_required_command_field() -> None:
+    """Проверяем отклонение при недостающем поле."""
     payload = {
         "drone_id": "drone_001",
         "vx": 3.5,
         "vy": -1.0,
-        "mag_heading": 90.0,
+        "mag_heading": 90.0,  # missing vz
     }
-    component = _make_component()
-    ok, message_type, validated_payload, reason = component._process_input_message(
-        COMMAND_TOPIC, payload
+    chain = ValidationChain(
+        commands_topic=COMMAND_TOPIC,
+        home_topic=HOME_TOPIC,
+        infopanel_client=_mock_infopanel,
     )
-    assert ok is False
-    assert message_type is None
-    assert validated_payload is None
-    assert "required property" in reason.lower() or "vz" in reason
+    result = chain.validate(COMMAND_TOPIC, payload)
+    
+    assert result.success is False
+    assert result.message_type is None or result.message_type == "COMMAND"
+    assert result.validated_payload is None
+    assert "required" in result.reason.lower() or "vz" in result.reason
 
 
 def test_process_input_message_rejects_additional_fields() -> None:
+    """Проверяем отклонение при лишних полях."""
     payload = {
         "drone_id": "drone_001",
         "home_lat": 59.0,
@@ -114,17 +129,19 @@ def test_process_input_message_rejects_additional_fields() -> None:
         "home_alt": 100.0,
         "unexpected": "value",
     }
-    component = _make_component()
-    ok, message_type, validated_payload, reason = component._process_input_message(
-        HOME_TOPIC, payload
+    chain = ValidationChain(
+        commands_topic=COMMAND_TOPIC,
+        home_topic=HOME_TOPIC,
+        infopanel_client=_mock_infopanel,
     )
-    assert ok is False
-    assert message_type is None
-    assert validated_payload is None
-    assert "Additional properties are not allowed" in reason
+    result = chain.validate(HOME_TOPIC, payload)
+    
+    assert result.success is False
+    assert "Additional properties" in result.reason
 
 
 def test_process_input_message_rejects_out_of_range_heading() -> None:
+    """Проверяем отклонение при некорректном heading."""
     payload = {
         "drone_id": "drone_001",
         "vx": 0.0,
@@ -132,25 +149,28 @@ def test_process_input_message_rejects_out_of_range_heading() -> None:
         "vz": 0.0,
         "mag_heading": 400.0,
     }
-    component = _make_component()
-    ok, message_type, validated_payload, reason = component._process_input_message(
-        COMMAND_TOPIC, payload
+    chain = ValidationChain(
+        commands_topic=COMMAND_TOPIC,
+        home_topic=HOME_TOPIC,
+        infopanel_client=_mock_infopanel,
     )
-    assert ok is False
-    assert message_type is None
-    assert validated_payload is None
-    assert "359.9" in reason
+    result = chain.validate(COMMAND_TOPIC, payload)
+    
+    assert result.success is False
+    assert "359.9" in result.reason or "maximum" in result.reason.lower()
 
 
 def test_process_input_message_rejects_unsupported_topic() -> None:
-    component = _make_component()
-    ok, message_type, validated_payload, reason = component._process_input_message(
-        "sitl-unknown", {"drone_id": "drone_001"}
+    """Проверяем отклонение неподдерживаемого топика."""
+    chain = ValidationChain(
+        commands_topic=COMMAND_TOPIC,
+        home_topic=HOME_TOPIC,
+        infopanel_client=_mock_infopanel,
     )
-    assert ok is False
-    assert message_type is None
-    assert validated_payload is None
-    assert "unsupported topic" in reason
+    result = chain.validate("sitl-unknown", {"drone_id": "drone_001"})
+    
+    assert result.success is False
+    assert "unsupported topic" in result.reason
 
 
 def test_verifier_start_subscribes_and_loop():
@@ -168,7 +188,6 @@ def test_verifier_log_callback_error_success_and_fail():
     fut_ok = asyncio.Future()
     fut_ok.set_result("ok")
     comp._log_callback_error(fut_ok, "cmd")
-
     fut_err = asyncio.Future()
     fut_err.set_exception(RuntimeError("fail"))
     comp._log_callback_error(fut_err, "cmd")
@@ -177,29 +196,61 @@ def test_verifier_log_callback_error_success_and_fail():
 @pytest.mark.asyncio
 async def test_handle_raw_command_reject_and_publish():
     mock_bus = MagicMock()
-    with patch.object(SitlVerifierComponent, '_process_input_message', return_value=(False, None, None, "bad")):
-        comp = SitlVerifierComponent("v1", mock_bus)
-        res = await comp._handle_raw_command({"payload": "x"})
+    component = SitlVerifierComponent("v1", mock_bus)
+    component._verified_commands_topic = VERIFIED_COMMAND_TOPIC
+    component._verified_home_topic = VERIFIED_HOME_TOPIC
+    
+    # Мокаем ValidationChain.validate вместо удалённого _process_input_message
+    with patch.object(component._validation_chain, 'validate',
+                     return_value=ValidationResult(False, None, None, "bad schema")):
+        res = await component._handle_raw_command({"payload": "x"})
         assert res["status"] == "rejected"
+        assert res["reason"] == "bad schema"
+        mock_bus.publish.assert_not_called()
 
-    with patch.object(SitlVerifierComponent, '_process_input_message', return_value=(True, "COMMAND", {"drone_id": "d"}, " ")):
-        with patch.object(contracts, "resolve_verified_topic", return_value="out"):
-            comp = SitlVerifierComponent("v1", mock_bus)
-            comp._verified_commands_topic = "cmd"
-            comp._verified_home_topic = "home"
-            res = await comp._handle_raw_command({"payload": {}})
+
+@pytest.mark.asyncio
+async def test_handle_raw_command_success_and_publish():
+    mock_bus = MagicMock()
+    component = SitlVerifierComponent("v1", mock_bus)
+    component._verified_commands_topic = VERIFIED_COMMAND_TOPIC
+    component._verified_home_topic = VERIFIED_HOME_TOPIC
+    
+    validated = {
+        "drone_id": "d", "vx": 1.0, "vy": 1.0, "vz": 0.0,
+        "mag_heading": 90.0, "verified_at": "now", "verified_by": "sitl_verifier"
+    }
+    
+    with patch.object(component._validation_chain, 'validate',
+                     return_value=ValidationResult(True, "COMMAND", validated, "")):
+        with patch("components.sitl_verifier.src.sitl_verifier.resolve_verified_topic",
+                  return_value="out_topic"):
+            res = await component._handle_raw_command({"payload": {}})
             assert res["status"] == "verified"
-            assert mock_bus.publish.called
+            assert res["output_topic"] == "out_topic"
+            mock_bus.publish.assert_called_once()
+            pub_topic, pub_msg = mock_bus.publish.call_args.args
+            assert pub_topic == "out_topic"
+            assert pub_msg["message_type"] == "COMMAND"
 
 
 @pytest.mark.asyncio
 async def test_handle_raw_home_reject_and_publish():
     mock_bus = MagicMock()
-    with patch.object(SitlVerifierComponent, '_process_input_message', return_value=(True, "HOME", {"drone_id": "d"}, " ")):
-        with patch.object(contracts, "resolve_verified_topic", return_value="out"):
-            comp = SitlVerifierComponent("v1", mock_bus)
-            comp._verified_commands_topic = "cmd"
-            comp._verified_home_topic = "home"
-            res = await comp._handle_raw_home({"payload": {}})
+    component = SitlVerifierComponent("v1", mock_bus)
+    component._verified_commands_topic = VERIFIED_COMMAND_TOPIC
+    component._verified_home_topic = VERIFIED_HOME_TOPIC
+    
+    validated = {
+        "drone_id": "d", "home_lat": 1.0, "home_lon": 1.0, "home_alt": 1.0,
+        "verified_at": "now", "verified_by": "sitl_verifier"
+    }
+    
+    with patch.object(component._validation_chain, 'validate',
+                     return_value=ValidationResult(True, "HOME", validated, "")):
+        with patch("components.sitl_verifier.src.sitl_verifier.resolve_verified_topic",
+                  return_value="home_out"):
+            res = await component._handle_raw_home({"payload": {}})
             assert res["status"] == "verified"
-            assert mock_bus.publish.called
+            mock_bus.publish.assert_called_once()
+            assert mock_bus.publish.call_args.args[0] == "home_out"

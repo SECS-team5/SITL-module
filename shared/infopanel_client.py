@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
-DEFAULT_INFOPANEL_URL = "https://infopanel.csse.ru/api"
+DEFAULT_INFOPANEL_URL = "https://droneanalytics.ourpaint.ru"
 DEFAULT_SERVICE = "SITL"
 DEFAULT_SERVICE_ID = 5
 DEFAULT_API_VERSION = "1.0.0"
