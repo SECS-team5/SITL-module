@@ -10,7 +10,6 @@ import os
 import pathlib
 import sys
 from typing import Any
-from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -89,49 +88,47 @@ async def test_command_updates_drone_state_via_topics() -> None:
         "vx": 5.0, "vy": 3.0, "vz": 1.5, "mag_heading": 45.0,
     }
 
-    # 🔑 Патчим валидацию, чтобы Controller принял поля verified_at/verified_by от Verifier
-    with patch("shared.contracts.validate_schema", return_value=(True, "")):
-        from components.sitl_verifier.src.sitl_verifier import SitlVerifierComponent
-        from components.sitl_controller.src.sitl_controller import SitlControllerComponent
+    from components.sitl_verifier.src.sitl_verifier import SitlVerifierComponent
+    from components.sitl_controller.src.sitl_controller import SitlControllerComponent
 
-        # 🚀 Запускаем компоненты
-        verifier = SitlVerifierComponent("test-verifier", bus)
-        controller = SitlControllerComponent("test-controller", bus)
-        verifier.start()
-        controller.start()
-        await asyncio.sleep(0.5)  # Даём время на регистрацию MQTT-подписок
+    # 🚀 Запускаем компоненты
+    verifier = SitlVerifierComponent("test-verifier", bus)
+    controller = SitlControllerComponent("test-controller", bus)
+    verifier.start()
+    controller.start()
+    await asyncio.sleep(0.5)  # Даём время на регистрацию MQTT-подписок
 
+    try:
+        print("1. Задаю HOME через входной топик...")
+        home_payload = {
+            "drone_id": DRONE_ID,
+            "home_lat": 59.9386, "home_lon": 30.3141, "home_alt": 120.0
+        }
+        bus.publish(INPUT_HOME_TOPIC, home_payload)
+
+        await _wait_for_home_in_redis(redis_client, DRONE_ID, timeout=10.0)
+        print("   ✅ HOME обработан")
+
+        print("2. Отправляю команду через входной топик...")
+        bus.publish(INPUT_COMMAND_TOPIC, command_payload)
+
+        print("3. Ожидаю обработку команды...")
+        stored = await _wait_for_status(redis_client, DRONE_ID, "MOVING", timeout=10.0)
+        assert float(stored["vx"]) == 5.0
+        assert float(stored["vy"]) == 3.0
+        assert float(stored["vz"]) == 1.5
+        assert float(stored["mag_heading"]) == 45.0
+        print(f"   ✅ Команда обработана: status={stored['status']}, vx={stored['vx']}")
+        print("\n✅ Тест пройден!")
+
+    finally:
+        await _safe_stop_components(verifier, controller)
+        bus.stop()
         try:
-            print("1. Задаю HOME через входной топик...")
-            home_payload = {
-                "drone_id": DRONE_ID,
-                "home_lat": 59.9386, "home_lon": 30.3141, "home_alt": 120.0
-            }
-            bus.publish(INPUT_HOME_TOPIC, home_payload)
-
-            await _wait_for_home_in_redis(redis_client, DRONE_ID, timeout=10.0)
-            print("   ✅ HOME обработан")
-
-            print("2. Отправляю команду через входной топик...")
-            bus.publish(INPUT_COMMAND_TOPIC, command_payload)
-
-            print("3. Ожидаю обработку команды...")
-            stored = await _wait_for_status(redis_client, DRONE_ID, "MOVING", timeout=10.0)
-            assert float(stored["vx"]) == 5.0
-            assert float(stored["vy"]) == 3.0
-            assert float(stored["vz"]) == 1.5
-            assert float(stored["mag_heading"]) == 45.0
-            print(f"   ✅ Команда обработана: status={stored['status']}, vx={stored['vx']}")
-            print("\n✅ Тест пройден!")
-
-        finally:
-            await _safe_stop_components(verifier, controller)
-            bus.stop()
-            try:
-                await redis_client.delete(drone_key)
-                await redis_client.aclose()
-            except Exception:
-                pass
+            await redis_client.delete(drone_key)
+            await redis_client.aclose()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     print(f"Тесты команд (BROKER_BACKEND={BROKER_BACKEND})")

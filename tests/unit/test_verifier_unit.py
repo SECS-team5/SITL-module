@@ -66,7 +66,10 @@ def test_process_input_message_accepts_valid_command_message() -> None:
     assert result.message_type == "COMMAND"
     assert result.validated_payload is not None
     assert result.validated_payload["drone_id"] == "drone_001"
-    assert "verified_at" in result.validated_payload
+    assert "verified_at" not in result.validated_payload
+    assert "verified_by" not in result.validated_payload
+    assert "verified_at" in result.verification_metadata
+    assert result.verification_metadata["verified_by"] == "sitl_verifier"
     assert contracts.resolve_verified_topic(
         result.message_type,
         VERIFIED_COMMAND_TOPIC,
@@ -177,20 +180,32 @@ def test_verifier_start_subscribes_and_loop():
     mock_bus = MagicMock()
     with patch.object(SitlVerifierComponent, '_register_handlers', return_value=None):
         comp = SitlVerifierComponent("v1", mock_bus, topic="test")
-        comp._loop = asyncio.get_event_loop()
-        comp.start()
-        assert mock_bus.subscribe.call_count >= 1
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            comp._loop = loop
+            comp.start()
+            assert mock_bus.subscribe.call_count >= 1
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
 
 
 def test_verifier_log_callback_error_success_and_fail():
     mock_bus = MagicMock()
     comp = SitlVerifierComponent("v1", mock_bus)
-    fut_ok = asyncio.Future()
-    fut_ok.set_result("ok")
-    comp._log_callback_error(fut_ok, "cmd")
-    fut_err = asyncio.Future()
-    fut_err.set_exception(RuntimeError("fail"))
-    comp._log_callback_error(fut_err, "cmd")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        fut_ok = loop.create_future()
+        fut_ok.set_result("ok")
+        comp._log_callback_error(fut_ok, "cmd")
+        fut_err = loop.create_future()
+        fut_err.set_exception(RuntimeError("fail"))
+        comp._log_callback_error(fut_err, "cmd")
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
 
 
 @pytest.mark.asyncio
@@ -218,11 +233,17 @@ async def test_handle_raw_command_success_and_publish():
     
     validated = {
         "drone_id": "d", "vx": 1.0, "vy": 1.0, "vz": 0.0,
-        "mag_heading": 90.0, "verified_at": "now", "verified_by": "sitl_verifier"
+        "mag_heading": 90.0,
     }
     
     with patch.object(component._validation_chain, 'validate',
-                     return_value=ValidationResult(True, "COMMAND", validated, "")):
+                     return_value=ValidationResult(
+                         True,
+                         "COMMAND",
+                         validated,
+                         "",
+                         {"verified_at": "now", "verified_by": "sitl_verifier"},
+                     )):
         with patch("components.sitl_verifier.src.sitl_verifier.resolve_verified_topic",
                   return_value="out_topic"):
             res = await component._handle_raw_command({"payload": {}})
@@ -232,6 +253,10 @@ async def test_handle_raw_command_success_and_publish():
             pub_topic, pub_msg = mock_bus.publish.call_args.args
             assert pub_topic == "out_topic"
             assert pub_msg["message_type"] == "COMMAND"
+            assert pub_msg["payload"] == validated
+            assert "verified_at" not in pub_msg["payload"]
+            assert pub_msg["verified_at"] == "now"
+            assert pub_msg["verified_by"] == "sitl_verifier"
 
 
 @pytest.mark.asyncio
@@ -243,14 +268,23 @@ async def test_handle_raw_home_reject_and_publish():
     
     validated = {
         "drone_id": "d", "home_lat": 1.0, "home_lon": 1.0, "home_alt": 1.0,
-        "verified_at": "now", "verified_by": "sitl_verifier"
     }
     
     with patch.object(component._validation_chain, 'validate',
-                     return_value=ValidationResult(True, "HOME", validated, "")):
+                     return_value=ValidationResult(
+                         True,
+                         "HOME",
+                         validated,
+                         "",
+                         {"verified_at": "now", "verified_by": "sitl_verifier"},
+                     )):
         with patch("components.sitl_verifier.src.sitl_verifier.resolve_verified_topic",
                   return_value="home_out"):
             res = await component._handle_raw_home({"payload": {}})
             assert res["status"] == "verified"
             mock_bus.publish.assert_called_once()
             assert mock_bus.publish.call_args.args[0] == "home_out"
+            pub_msg = mock_bus.publish.call_args.args[1]
+            assert pub_msg["payload"] == validated
+            assert "verified_at" not in pub_msg["payload"]
+            assert pub_msg["verified_at"] == "now"

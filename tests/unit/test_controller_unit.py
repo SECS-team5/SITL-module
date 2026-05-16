@@ -101,6 +101,8 @@ async def test_handle_verified_command_after_home(fake_redis):
             "mag_heading": 90.0,
         },
         "message_type": "COMMAND",
+        "verified_at": "2026-05-16T10:00:00+00:00",
+        "verified_by": "sitl_verifier",
     }
     result = await component._handle_verified_message(command_message)
     assert result["status"] == "command_applied"

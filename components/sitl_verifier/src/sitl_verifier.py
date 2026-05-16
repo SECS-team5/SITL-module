@@ -5,7 +5,7 @@ SITL Verifier — компонент валидации команд.
 import asyncio
 import os
 from typing import Dict, Any, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sdk.base_async_component import BaseAsyncComponent
 from sdk.messages import Message
@@ -37,6 +37,7 @@ class ValidationResult:
     message_type: Optional[str]
     validated_payload: Optional[Dict[str, Any]]
     reason: str
+    verification_metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class ValidationChain:
@@ -101,13 +102,14 @@ class ValidationChain:
             )
 
         # Step 4: Final Verification Handler
-        verified_payload = self._handle_final_verification(payload, message_type)
+        verification_metadata = self._handle_final_verification(payload, message_type)
 
         return ValidationResult(
             success=True,
             message_type=message_type,
-            validated_payload=verified_payload,
-            reason=""
+            validated_payload=dict(payload),
+            reason="",
+            verification_metadata=verification_metadata,
         )
 
     def _handle_json_parse(self, raw_payload: Any) -> Optional[Dict[str, Any]]:
@@ -178,18 +180,16 @@ class ValidationChain:
         """
         from datetime import datetime, timezone
 
-        # Добавляем timestamp верификации для traceability
-        verified_payload = payload.copy()
-        verified_payload["verified_at"] = datetime.now(timezone.utc).isoformat()
-        verified_payload["verified_by"] = "sitl_verifier"
-
         self._infopanel.log_event(
             f"Message verified: type={message_type}, drone_id={payload.get('drone_id')}",
             severity="info",
             event_type="verification_success"
         )
 
-        return verified_payload
+        return {
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+            "verified_by": "sitl_verifier",
+        }
 
 
 class SitlVerifierComponent(BaseAsyncComponent):
@@ -344,6 +344,7 @@ class SitlVerifierComponent(BaseAsyncComponent):
             sender=self.component_id,
         ).to_dict()
         verified_message["message_type"] = result.message_type
+        verified_message.update(result.verification_metadata)
 
         self.bus.publish(output_topic, verified_message)
 
@@ -393,6 +394,7 @@ class SitlVerifierComponent(BaseAsyncComponent):
             sender=self.component_id,
         ).to_dict()
         verified_message["message_type"] = result.message_type
+        verified_message.update(result.verification_metadata)
 
         self.bus.publish(output_topic, verified_message)
 

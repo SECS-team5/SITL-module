@@ -24,8 +24,10 @@ def test_cpbb1_valid_command_passes_chain(chain, mock_infopanel):
     res = chain.validate("sitl.commands", payload)
     assert res.success is True
     assert res.message_type == "COMMAND"
-    assert "verified_at" in res.validated_payload
-    assert res.validated_payload["verified_by"] == "sitl_verifier"
+    assert "verified_at" not in res.validated_payload
+    assert "verified_by" not in res.validated_payload
+    assert "verified_at" in res.verification_metadata
+    assert res.verification_metadata["verified_by"] == "sitl_verifier"
     mock_infopanel.log_event.assert_called()
 
 def test_cpbb1_invalid_json_logs_warning(chain, mock_infopanel):

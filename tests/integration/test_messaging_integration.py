@@ -75,11 +75,10 @@ async def _run_test():
 
     bus.subscribe(RESPONSE_TOPIC, _on_response)
 
-    # 🔑 Патчи для совместимости и обхода строгой валидации
+    # Патчи event loop/infopanel применяются ВНУТРИ теста, чтобы работать без pytest.
     with patch("asyncio.get_event_loop", asyncio.get_running_loop), \
          patch("asyncio.run_coroutine_threadsafe", lambda coro, loop: asyncio.ensure_future(coro, loop=loop)), \
-         patch("shared.infopanel_client.create_infopanel_client_from_env", return_value=MagicMock()), \
-         patch("shared.contracts.validate_schema", return_value=(True, "")):
+         patch("shared.infopanel_client.create_infopanel_client_from_env", return_value=MagicMock()):
 
         from components.sitl_verifier.src.sitl_verifier import SitlVerifierComponent
         from components.sitl_controller.src.sitl_controller import SitlControllerComponent
